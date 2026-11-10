@@ -53,7 +53,7 @@ test('register rejects a taken username and a name already in the group', async 
 test('login succeeds with the right password and fails with the wrong one', async () => {
   await signup('Cal', { username: 'cal', password: 'hunter22' });
   const ok = await request('POST', '/api/auth/login', { body: { username: ' CAL ', password: 'hunter22' } });
-  assert.equal(ok.status, 201);
+  assert.equal(ok.status, 200);
   assert.equal(ok.body.user.username, 'cal');
   assert.match(ok.headers.get('set-cookie'), /^ts_session=/);
   const badPw = await request('POST', '/api/auth/login', { body: { username: 'cal', password: 'nope' } });
@@ -77,11 +77,11 @@ test('logout ends the session', async () => {
   const u = await signup('Eve');
   assert.equal((await u.get('/api/people')).status, 200);
   const r = await u.post('/api/auth/logout');
-  assert.equal(r.status, 201);
+  assert.equal(r.status, 200);
   assert.match(r.headers.get('set-cookie'), /Max-Age=0/);
   assert.equal((await u.get('/api/people')).status, 401);
   // Logging out without a session is harmless.
-  assert.equal((await request('POST', '/api/auth/logout')).status, 201);
+  assert.equal((await request('POST', '/api/auth/logout')).status, 200);
 });
 
 test('change password requires the current one and the new one works', async () => {
@@ -92,9 +92,9 @@ test('change password requires the current one and the new one works', async () 
   r = await u.post('/api/auth/password', { current: 'oldpass1', next: 'short' });
   assert.equal(r.status, 400);
   r = await u.post('/api/auth/password', { current: 'oldpass1', next: 'newpass1' });
-  assert.equal(r.status, 201);
+  assert.equal(r.status, 200);
   assert.equal((await request('POST', '/api/auth/login', { body: { username: 'fay', password: 'oldpass1' } })).status, 401);
-  assert.equal((await request('POST', '/api/auth/login', { body: { username: 'fay', password: 'newpass1' } })).status, 201);
+  assert.equal((await request('POST', '/api/auth/login', { body: { username: 'fay', password: 'newpass1' } })).status, 200);
 });
 
 test('protected routes require a session; unknown and expired tokens are rejected', async () => {

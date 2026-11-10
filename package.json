@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Track shared travel expenses for up to 10 people and split costs automatically.",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "lint": "eslint .",

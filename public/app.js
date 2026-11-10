@@ -1,5 +1,5 @@
 // Travel Splitter front end (vanilla JS). Split math comes from shared.js (window.Shared).
-const { distributeUnits, percentTotalOk, parseAmount, currencyDigits, unitCents, localToday } = window.Shared;
+const { distributeUnits, percentTotalOk, parseAmount, currencyDigits, unitCents, localToday, CATEGORIES, DEFAULT_CATEGORY } = window.Shared;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Icon-only button with a real accessible name (the emoji itself is hidden from screen
@@ -224,7 +224,7 @@ const searchText = (e) => [e.description, e.category, e.notes, personName(e.paid
 function renderExpenses() {
   const search = $('#search');
   // A search belongs to one trip: start fresh when you switch (#20).
-  if (search.dataset.trip !== state.tripId) { search.value = ''; search.dataset.trip = state.tripId || ''; }
+  if (search.dataset.forTrip !== state.tripId) { search.value = ''; search.dataset.forTrip = state.tripId || ''; }
   const q = search.value.trim().toLowerCase();
   const list = state.expenses.filter((e) => !q || searchText(e).includes(q));
   if (!list.length) {
@@ -279,7 +279,7 @@ function openPerson(p) {
   $('#personError').textContent = '';
   $('#personDialog').showModal();
 }
-$('#newPersonBtn').onclick = () => openPerson();
+$('#newPersonBtn').addEventListener('click', () => openPerson());
 $('#personForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const name = ev.target.name.value;
@@ -300,10 +300,10 @@ function showInvite(p) {
   $('#inviteCode').textContent = formatCode(p.inviteCode);
   $('#inviteDialog').showModal();
 }
-$('#copyInviteBtn').onclick = async () => {
+$('#copyInviteBtn').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('#inviteCode').textContent); toast('Invite code copied'); }
   catch { toast('Copy failed — select the code and copy it manually'); }
-};
+});
 $('#peopleList').addEventListener('click', async (ev) => {
   const edit = ev.target.closest('[data-edit-person]');
   const del = ev.target.closest('[data-del-person]');
@@ -350,12 +350,12 @@ function openTrip(t) {
   $('#tripError').textContent = '';
   $('#tripDialog').showModal();
 }
-$('#newTripBtn').onclick = () => openTrip();
+$('#newTripBtn').addEventListener('click', () => openTrip());
 // Reload first, so the form starts from the latest version of the trip (#18).
-$('#editTripBtn').onclick = async () => {
+$('#editTripBtn').addEventListener('click', async () => {
   try { await loadAll(); } catch (e) { toast(e.message); return; }
   openTrip(trip());
-};
+});
 $('#tripForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   return busy(ev.submitter, () => saveTrip(ev.target));
@@ -385,7 +385,7 @@ async function saveTrip(f) {
     showError(e, $('#tripError'));
   }
 }
-$('#deleteTripBtn').onclick = async (ev) => {
+$('#deleteTripBtn').addEventListener('click', async (ev) => {
   const t = trip();
   const btn = ev.currentTarget;
   if (!(await confirmDialog(`It has ${state.expenses.length} expense${state.expenses.length === 1 ? '' : 's'}. This can't be undone.`,
@@ -399,7 +399,7 @@ $('#deleteTripBtn').onclick = async (ev) => {
       focusFirst('.trip-btn[aria-current]', '#newTripBtn');
     } catch (e) { showError(e); }
   });
-};
+});
 $('#tripList').addEventListener('click', async (ev) => {
   const li = ev.target.closest('[data-trip]');
   if (!li || li.dataset.trip === state.tripId) return;
@@ -497,7 +497,11 @@ function openExpense(e) {
   f.amount.min = String(10 ** -digits);
   f.amount.value = e ? amountText(e.amountCents, t.currency) : '';
   f.date.value = e?.date || localToday(); // the user's date, not UTC's (#6)
-  f.category.value = e?.category || 'Food';
+  // Categories come from shared.js, like the server's. An older expense may use one that's no
+  // longer in the list: show it as an extra option rather than an empty select (#21).
+  const cats = e?.category && !CATEGORIES.includes(e.category) ? [...CATEGORIES, e.category] : CATEGORIES;
+  f.category.innerHTML = cats.map((c) => `<option>${esc(c)}</option>`).join('');
+  f.category.value = e?.category || DEFAULT_CATEGORY;
   f.notes.value = e?.notes || '';
   f.paidBy.value = e?.paidBy || (t.memberIds.includes(state.me) ? state.me : t.memberIds[0]);
 
@@ -513,7 +517,7 @@ function openExpense(e) {
   f.description.focus();
 }
 
-$('#addExpenseBtn').onclick = () => openExpense();
+$('#addExpenseBtn').addEventListener('click', () => openExpense());
 $('#splitMode').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-mode]');
   if (!b) return;
@@ -641,7 +645,7 @@ function switchAuthTab(tab) {
   document.querySelectorAll('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   $('#loginForm').hidden = tab !== 'login';
   $('#registerForm').hidden = tab !== 'register';
-  (tab === 'login' ? $('#loginForm') : $('#registerForm')).querySelector('input:not([hidden])')?.focus();
+  (tab === 'login' ? $('#loginForm') : $('#registerForm')).querySelector('input')?.focus();
 }
 async function signedIn(user, maxPeople) {
   // Whatever was on screen belonged to the previous session.
@@ -683,14 +687,14 @@ $('#registerForm').addEventListener('submit', (ev) => {
   });
 });
 
-$('#logoutBtn').onclick = (ev) => busy(ev.currentTarget, async () => {
+$('#logoutBtn').addEventListener('click', (ev) => busy(ev.currentTarget, async () => {
   try {
     await api('POST', '/api/auth/logout');
     showAuth();
   } catch (e) { showError(e); }
-});
+}));
 
-$('#passwordBtn').onclick = () => { $('#passwordForm').reset(); $('#passwordError').textContent = ''; $('#passwordDialog').showModal(); };
+$('#passwordBtn').addEventListener('click', () => { $('#passwordForm').reset(); $('#passwordError').textContent = ''; $('#passwordDialog').showModal(); });
 $('#passwordForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;

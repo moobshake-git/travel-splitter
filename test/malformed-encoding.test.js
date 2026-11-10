@@ -11,7 +11,7 @@ test("another app's malformed cookie doesn't break login or the session", async 
   const junk = 'progress=100%; theme=%E0%A4%A';
   const u = await signup('Ana', { username: 'ana', password: 'secret123' });
   const login = await request('POST', '/api/auth/login', { body: { username: 'ana', password: 'secret123' }, cookie: junk });
-  assert.equal(login.status, 201);
+  assert.equal(login.status, 200);
   const me = await request('GET', '/api/auth/me', { cookie: `${junk}; ${u.cookie}` });
   assert.equal(me.status, 200);
   assert.equal(me.body.user.id, u.user.id);

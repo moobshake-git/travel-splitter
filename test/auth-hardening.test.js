@@ -22,7 +22,7 @@ test('session tokens are stored hashed, never as-is', async () => {
 
 test('each person keeps at most 10 sessions (oldest dropped)', async () => {
   const first = await signup('Many', { username: 'many', password: 'secret123' });
-  for (let i = 0; i < 10; i++) assert.equal((await login('many', 'secret123')).status, 201);
+  for (let i = 0; i < 10; i++) assert.equal((await login('many', 'secret123')).status, 200);
   const mine = Object.values(disk().sessions).filter((s) => s.personId === first.user.id);
   assert.equal(mine.length, 10);
   assert.equal((await first.get('/api/trips')).status, 401, 'the oldest session was dropped');
@@ -60,12 +60,12 @@ test('password change: 5 wrong guesses lock it and log that session out (#14)', 
   // Still locked from another session, even with the right password.
   const locked = await request('POST', '/api/auth/password', { cookie: other, body: { current: 'right123', next: 'newpass1' } });
   assert.equal(locked.status, 429);
-  assert.equal((await login('guard', 'right123')).status, 201, 'the password itself was never changed');
+  assert.equal((await login('guard', 'right123')).status, 200, 'the password itself was never changed');
 });
 
 test('password change: a correct guess resets the counter', async () => {
   const u = await signup('Reset', { username: 'resetty', password: 'right123' });
   for (let i = 0; i < 4; i++) await u.post('/api/auth/password', { current: 'nope', next: 'newpass1' });
-  assert.equal((await u.post('/api/auth/password', { current: 'right123', next: 'newpass2' })).status, 201);
+  assert.equal((await u.post('/api/auth/password', { current: 'right123', next: 'newpass2' })).status, 200);
   for (let i = 0; i < 4; i++) assert.equal((await u.post('/api/auth/password', { current: 'nope', next: 'newpass3' })).status, 400);
 });

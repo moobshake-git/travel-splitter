@@ -46,7 +46,7 @@ test('reset-password refuses to run while the server is up, and works once it st
     const r = cli(env, 'ana', 'newpass1');
     assert.equal(r.status, 1);
     assert.match(r.stderr, /server is running/);
-    assert.equal(await login(base, 'ana', 'oldpass1'), 201, 'nothing changed');
+    assert.equal(await login(base, 'ana', 'oldpass1'), 200, 'nothing changed');
 
     await stopServer(child);
     assert.ok(!fs.existsSync(env.TS_DATA_FILE + '.lock'), 'lock released on shutdown');
@@ -56,7 +56,7 @@ test('reset-password refuses to run while the server is up, and works once it st
     assert.match(ok.stdout, /Password reset for Ana \(ana\)/);
 
     ({ child, base } = await startServer(env));
-    assert.equal(await login(base, 'ana', 'newpass1'), 201);
+    assert.equal(await login(base, 'ana', 'newpass1'), 200);
     assert.equal(await login(base, 'ana', 'oldpass1'), 401);
     await stopServer(child);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

@@ -20,7 +20,7 @@
         <label>Username<input name="username" required autocomplete="username" autocapitalize="none"></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
         <p class="error" id="loginError" role="alert"></p>
-        <button class="btn primary">Log in</button>
+        <button type="submit" class="btn primary">Log in</button>
       </form>
 
       <form id="registerForm" class="auth-form" hidden>
@@ -30,7 +30,7 @@
         <label>Password<input name="password" type="password" required minlength="6" autocomplete="new-password"></label>
         <label>Confirm password<input name="confirm" type="password" required minlength="6" autocomplete="new-password"></label>
         <p class="error" id="registerError" role="alert"></p>
-        <button class="btn primary">Create account</button>
+        <button type="submit" class="btn primary">Create account</button>
       </form>
     </div>
   </div>
@@ -115,20 +115,20 @@
 
   <!-- Person dialog -->
   <dialog id="personDialog">
-    <form method="dialog" id="personForm">
+    <form id="personForm">
       <h2 id="personDialogTitle">Add person</h2>
       <label>Name<input name="name" required maxlength="80" autocomplete="off"></label>
       <p class="error" id="personError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
-        <button class="btn primary" value="save">Save</button>
+        <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
   </dialog>
 
   <!-- Trip dialog -->
   <dialog id="tripDialog">
-    <form method="dialog" id="tripForm">
+    <form id="tripForm">
       <h2 id="tripDialogTitle">New trip</h2>
       <label>Trip name<input name="name" required maxlength="80" autocomplete="off" placeholder="e.g. Tokyo 2026"></label>
       <label>Currency<input name="currency" maxlength="3" pattern="[A-Za-z]{3}" title="3-letter code, e.g. USD, EUR, SGD, JPY" value="USD" autocapitalize="characters" list="currencyList" autocomplete="off"></label>
@@ -141,14 +141,14 @@
       <p class="error" id="tripError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
-        <button class="btn primary" value="save">Save</button>
+        <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
   </dialog>
 
   <!-- Expense dialog -->
   <dialog id="expenseDialog" class="wide">
-    <form method="dialog" id="expenseForm">
+    <form id="expenseForm">
       <h2 id="expenseDialogTitle">Add expense</h2>
       <div class="row">
         <label class="grow">Description<input name="description" required maxlength="80" autocomplete="off" placeholder="e.g. Dinner at Ichiran"></label>
@@ -158,10 +158,7 @@
         <label class="grow">Paid by<select name="paidBy"></select></label>
         <label>Date<input name="date" type="date"></label>
         <label>Category
-          <select name="category">
-            <option>Food</option><option>Lodging</option><option>Transport</option>
-            <option>Activities</option><option>Shopping</option><option>Other</option>
-          </select>
+          <select name="category"></select>
         </label>
       </div>
 
@@ -182,27 +179,27 @@
       <p class="error" id="expenseError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
-        <button class="btn primary" value="save">Save expense</button>
+        <button type="submit" class="btn primary">Save expense</button>
       </div>
     </form>
   </dialog>
 
   <!-- Invite code dialog -->
   <dialog id="inviteDialog">
-    <form method="dialog">
+    <form method="dialog"><!-- the Done button closes the dialog natively -->
       <h2>Invite <span id="inviteName"></span></h2>
       <p class="muted flush">Send them this code. They enter it on <b>Create account</b> to join with their spot, trips and expenses. Each code works once.</p>
       <div class="invite-code" id="inviteCode"></div>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" id="copyInviteBtn">Copy code</button>
-        <button class="btn primary" value="close">Done</button>
+        <button type="submit" class="btn primary">Done</button>
       </div>
     </form>
   </dialog>
 
   <!-- Change password dialog -->
   <dialog id="passwordDialog">
-    <form method="dialog" id="passwordForm">
+    <form id="passwordForm">
       <h2>Change password</h2>
       <label>Current password<input name="current" type="password" required autocomplete="current-password"></label>
       <label>New password<input name="next" type="password" required minlength="6" autocomplete="new-password"></label>
@@ -210,7 +207,7 @@
       <p class="error" id="passwordError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
-        <button class="btn primary" value="save">Update</button>
+        <button type="submit" class="btn primary">Update</button>
       </div>
     </form>
   </dialog>
