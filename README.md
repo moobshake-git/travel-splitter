@@ -14,6 +14,18 @@ Open http://localhost:3000. Data is saved to `data.json` next to `server.js`
 (delete that file to start fresh). Anyone on your Wi-Fi can use it at
 `http://<your-computer-ip>:3000`.
 
+## Tests
+
+Uses Node's built-in test runner (Node 22+), still no dependencies:
+
+```bash
+npm test           # run the API tests
+npm run coverage   # with a line/branch coverage report for server.js
+```
+
+Tests start the real server on a random port against a throwaway data file
+(`TS_DATA_FILE`), so your `data.json` is never touched.
+
 ## Accounts
 - Everyone logs in with their own **username and password**.
 - **Create account**: enter your name, a username and a password (max 10 people).

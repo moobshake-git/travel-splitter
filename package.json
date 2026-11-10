@@ -3,5 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Track shared travel expenses for up to 10 people and split costs automatically.",
-  "scripts": { "start": "node server.js" }
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test 'test/*.test.js'",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js 'test/*.test.js'"
+  }
 }

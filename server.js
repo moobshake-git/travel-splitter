@@ -6,7 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DATA_FILE = path.join(__dirname, 'data.json');
+// TS_DATA_FILE lets tests point the server at a throwaway file.
+const DATA_FILE = process.env.TS_DATA_FILE || path.join(__dirname, 'data.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_PEOPLE = 10;
 const SESSION_DAYS = 30;
@@ -486,4 +487,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`Travel Splitter running at http://localhost:${PORT}`));
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`Travel Splitter running at http://localhost:${PORT}`));
+}
+module.exports = { server };
