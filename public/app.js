@@ -180,13 +180,19 @@ function renderTrip(t) {
 }
 
 const MODE_LABEL = { equal: 'split evenly', exact: 'exact amounts', percent: 'by percent', shares: 'by shares' };
+// Everything a search can match: description, category, notes, who paid and who shared it (#20).
+const searchText = (e) => [e.description, e.category, e.notes, personName(e.paidBy), ...e.shares.map((s) => personName(s.personId))]
+  .join('\n').toLowerCase();
 function renderExpenses() {
-  const q = $('#search').value.trim().toLowerCase();
-  const list = state.expenses.filter((e) => !q ||
-    e.description.toLowerCase().includes(q) || e.category.toLowerCase().includes(q) ||
-    personName(e.paidBy).toLowerCase().includes(q));
+  const search = $('#search');
+  // A search belongs to one trip: start fresh when you switch (#20).
+  if (search.dataset.trip !== state.tripId) { search.value = ''; search.dataset.trip = state.tripId || ''; }
+  const q = search.value.trim().toLowerCase();
+  const list = state.expenses.filter((e) => !q || searchText(e).includes(q));
   if (!list.length) {
-    $('#expenseList').innerHTML = `<p class="muted">${state.expenses.length ? 'No matches.' : 'No expenses yet. Click “+ Add expense”.'}</p>`;
+    $('#expenseList').innerHTML = !state.expenses.length
+      ? '<p class="muted">No expenses yet. Click “+ Add expense”.</p>'
+      : `<p class="muted">No matches for “${esc(search.value.trim())}”. <button type="button" class="btn small" id="clearSearchBtn">Clear search</button></p>`;
     return;
   }
   $('#expenseList').innerHTML = list.map((e) => {
@@ -403,7 +409,11 @@ function updateSplitPreview() {
   let foot;
   if (mode === 'equal') {
     distributeUnits(total, ids.map(() => 1), unit).forEach((c, i) => (shares[ids[i]] = c));
-    foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${ids.length ? money(Math.floor(total / ids.length), t.currency) + ' each' : ''}</span>`;
+    // When it doesn't divide evenly, say so: "$3.33–$3.34 each", not a rounded-down "$3.33 each" (#20).
+    const vals = ids.map((id) => shares[id]);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const each = !ids.length ? '' : lo === hi ? `${money(lo, t.currency)} each` : `${money(lo, t.currency)}–${money(hi, t.currency)} each`;
+    foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${each}</span>`;
   } else if (mode === 'exact') {
     let sum = 0;
     ids.forEach((id) => { const c = amountCents(rows[id].value, t.currency); shares[id] = c; sum += c; });
@@ -415,9 +425,11 @@ function updateSplitPreview() {
     distributeUnits(total, w, unit).forEach((c, i) => (shares[ids[i]] = c));
     if (mode === 'percent') {
       const p = +w.reduce((a, b) => a + b, 0).toFixed(3);
-      foot = `<span>Total ${p}%</span>` + (percentTotalOk(p) ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
+      // "5% over", not "-5% over" (#20).
+      foot = `<span>Total ${p}%</span>` + (percentTotalOk(p) ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+Math.abs(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
     } else {
-      foot = `<span>${w.reduce((a, b) => a + b, 0)} total shares</span><span></span>`;
+      // Rounded like the percent total: 0.1 + 0.2 shows as 0.3, not 0.30000000000000004 (#20).
+      foot = `<span>${+w.reduce((a, b) => a + b, 0).toFixed(3)} total shares</span><span></span>`;
     }
   }
   t.memberIds.forEach((id) => {
@@ -537,6 +549,12 @@ $('#expenseList').addEventListener('click', async (ev) => {
   }
 });
 $('#search').addEventListener('input', renderExpenses);
+$('#expenseList').addEventListener('click', (ev) => {
+  if (!ev.target.closest('#clearSearchBtn')) return;
+  $('#search').value = '';
+  renderExpenses();
+  $('#search').focus();
+});
 
 // "Mark paid" on a settle-up line records the payment (#19).
 $('#transferList').addEventListener('click', async (ev) => {
@@ -641,6 +659,21 @@ $('#passwordForm').addEventListener('submit', (ev) => {
     }
   });
 });
+
+// ---------- keep shared data fresh ----------
+// Other members change things too. Reload when you come back to the tab, and every 45 s while
+// it's visible, but never while a dialog is open (it would pull data out from under a form) (#20).
+const REFRESH_MS = 45_000;
+let lastRefresh = 0;
+async function refresh() {
+  if (!state.me || document.hidden || document.querySelector('dialog[open]')) return;
+  if (Date.now() - lastRefresh < 5_000) return;
+  lastRefresh = Date.now();
+  try { await loadAll(); } catch (e) { if (!e.sessionEnded) console.warn('Refresh failed:', e.message); }
+}
+document.addEventListener('visibilitychange', refresh);
+window.addEventListener('focus', refresh);
+setInterval(refresh, REFRESH_MS);
 
 // ---------- start ----------
 (async () => {
