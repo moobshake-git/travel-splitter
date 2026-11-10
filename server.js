@@ -326,9 +326,12 @@ route('POST', '/api/auth/logout', (_, __, ctx) => {
   return { ok: true };
 }, { public: true });
 
-route('POST', '/api/auth/password', (b, _, { user }) => {
+route('POST', '/api/auth/password', (b, _, { user, req }) => {
   if (typeof b.current !== 'string' || !checkPassword(b.current, user.account)) bad('Current password is wrong');
   user.account = { username: user.account.username, ...hashPassword(cleanPassword(b.next)) };
+  // Sign out every other device: changing your password must cut off anyone using an old session.
+  const current = parseCookies(req.headers.cookie)[COOKIE];
+  for (const [t, s] of Object.entries(db.sessions)) if (s.personId === user.id && t !== current) delete db.sessions[t];
   save();
   return { ok: true };
 });
