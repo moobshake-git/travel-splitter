@@ -47,7 +47,7 @@ test('exact split must match the total', () => {
   assert.deepEqual(cents(s), [750, 250]);
   assert.deepEqual(s.map((x) => x.value), [7.5, 2.5]);
   throwsMsg(() => computeShares(1000, 'exact', [{ personId: 'a', value: 9.99 }], members), /add up to 9.99 but the expense is 10.00/);
-  throwsMsg(() => computeShares(1000, 'exact', [{ personId: 'a', value: 'x' }], members), /share must be a number/);
+  throwsMsg(() => computeShares(1000, 'exact', [{ personId: 'a', value: 'x' }], members), /Each share must be a number/);
 });
 
 test('percent: 99.999% is close enough, 99.99% is not', () => {

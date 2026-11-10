@@ -55,7 +55,7 @@ test('exact, percent and shares split modes', async () => {
 test('expense validation', async () => {
   const cases = [
     [{ description: '' }, /Description is required/],
-    [{ amount: 'abc' }, /amount must be a number/],
+    [{ amount: 'abc' }, /Amount must be a number like 12/],
     [{ amount: 0 }, /more than zero/],
     [{ paidBy: 'nobody' }, /Payer must be on this trip/],
     [{ splits: [] }, /at least one person/],

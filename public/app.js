@@ -1,5 +1,5 @@
 // Travel Splitter front end (vanilla JS). Split math comes from shared.js (window.Shared).
-const { distribute, toCents, percentTotalOk } = window.Shared;
+const { distributeUnits, percentTotalOk, parseAmount, currencyDigits, unitCents, localToday } = window.Shared;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -31,6 +31,10 @@ async function api(method, url, body) {
 
 // ---------- formatting ----------
 const trip = () => state.trips.find((t) => t.id === state.tripId);
+// Amount typed in a form → hundredths, or 0 while it isn't a valid amount yet (for previews).
+const amountCents = (v, currency = trip()?.currency) => parseAmount(v, currency).cents || 0;
+// Hundredths → the text to put in an amount input (no decimals for JPY etc.).
+const amountText = (cents, currency = trip()?.currency) => (cents / 100).toFixed(currencyDigits(currency));
 const personName = (id) => state.people.find((p) => p.id === id)?.name ?? 'Unknown';
 function money(cents, currency = trip()?.currency || 'USD') {
   const v = cents / 100;
@@ -321,7 +325,7 @@ function renderSplit() {
     const r = rows[id];
     const control = mode === 'equal'
       ? `<span></span>`
-      : `<input type="number" step="any" min="0" placeholder="0 ${unit}" data-split-val="${id}" value="${esc(r.value)}">`;
+      : `<input type="number" step="${mode === 'exact' ? 10 ** -currencyDigits(t.currency) : 'any'}" min="0" placeholder="0 ${unit}" data-split-val="${id}" value="${esc(r.value)}">`;
     return `<div class="split-row">
       <label class="who">${mode === 'equal' ? `<input type="checkbox" data-split-on="${id}" ${r.on ? 'checked' : ''}>` : ''}${esc(personName(id))}</label>
       ${control}
@@ -334,22 +338,23 @@ function renderSplit() {
 function updateSplitPreview() {
   const t = trip();
   const { mode, rows } = state.split;
-  const total = toCents($('#expenseForm').amount.value) || 0;
+  const total = amountCents($('#expenseForm').amount.value, t.currency);
+  const unit = unitCents(t.currency);
   const ids = activeRows();
   const shares = {};
   let foot;
   if (mode === 'equal') {
-    distribute(total, ids.map(() => 1)).forEach((c, i) => (shares[ids[i]] = c));
+    distributeUnits(total, ids.map(() => 1), unit).forEach((c, i) => (shares[ids[i]] = c));
     foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${ids.length ? money(Math.floor(total / ids.length), t.currency) + ' each' : ''}</span>`;
   } else if (mode === 'exact') {
     let sum = 0;
-    ids.forEach((id) => { const c = toCents(rows[id].value) || 0; shares[id] = c; sum += c; });
+    ids.forEach((id) => { const c = amountCents(rows[id].value, t.currency); shares[id] = c; sum += c; });
     const diff = total - sum;
     foot = `<span>Assigned ${money(sum, t.currency)} of ${money(total, t.currency)}</span>` +
       (diff === 0 ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${money(Math.abs(diff), t.currency)} ${diff > 0 ? 'left to assign' : 'too much'}</span>`);
   } else {
     const w = ids.map((id) => Number(rows[id].value));
-    distribute(total, w).forEach((c, i) => (shares[ids[i]] = c));
+    distributeUnits(total, w, unit).forEach((c, i) => (shares[ids[i]] = c));
     if (mode === 'percent') {
       const p = +w.reduce((a, b) => a + b, 0).toFixed(3);
       foot = `<span>Total ${p}%</span>` + (percentTotalOk(p) ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
@@ -371,8 +376,12 @@ function openExpense(e) {
   $('#expenseDialogTitle').textContent = e ? 'Edit expense' : 'Add expense';
   f.paidBy.innerHTML = t.memberIds.map((id) => `<option value="${id}">${esc(personName(id))}</option>`).join('');
   f.description.value = e?.description || '';
-  f.amount.value = e ? (e.amountCents / 100).toFixed(2) : '';
-  f.date.value = e?.date || new Date().toISOString().slice(0, 10);
+  // Whole units only for currencies like JPY (#6).
+  const digits = currencyDigits(t.currency);
+  f.amount.step = String(10 ** -digits);
+  f.amount.min = String(10 ** -digits);
+  f.amount.value = e ? amountText(e.amountCents, t.currency) : '';
+  f.date.value = e?.date || localToday(); // the user's date, not UTC's (#6)
   f.category.value = e?.category || 'Food';
   f.notes.value = e?.notes || '';
   f.paidBy.value = e?.paidBy || (t.memberIds.includes(state.me) ? state.me : t.memberIds[0]);
@@ -401,12 +410,13 @@ $('#splitMode').addEventListener('click', (ev) => {
   const included = prev === 'equal'
     ? Object.keys(rows).filter((id) => rows[id].on)
     : Object.keys(rows).filter((id) => Number(rows[id].value) > 0);
-  const totalCents = toCents($('#expenseForm').amount.value) || 0;
-  const evenCents = distribute(totalCents, included.map(() => 1));
+  const cur = trip().currency;
+  const totalCents = amountCents($('#expenseForm').amount.value, cur);
+  const evenCents = distributeUnits(totalCents, included.map(() => 1), unitCents(cur));
   for (const id of Object.keys(rows)) {
     const idx = included.indexOf(id);
     rows[id].on = idx >= 0;
-    if (next === 'exact') rows[id].value = idx >= 0 && totalCents ? (evenCents[idx] / 100).toFixed(2) : '';
+    if (next === 'exact') rows[id].value = idx >= 0 && totalCents ? amountText(evenCents[idx], cur) : '';
     if (next === 'percent') rows[id].value = idx >= 0 ? String(+(100 / included.length).toFixed(4)) : '';
     if (next === 'shares') rows[id].value = idx >= 0 ? '1' : '';
   }
