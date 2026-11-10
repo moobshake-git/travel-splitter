@@ -131,7 +131,9 @@
     <form method="dialog" id="tripForm">
       <h2 id="tripDialogTitle">New trip</h2>
       <label>Trip name<input name="name" required maxlength="80" autocomplete="off" placeholder="e.g. Tokyo 2026"></label>
-      <label>Currency<input name="currency" maxlength="3" pattern="[A-Za-z]{3}" title="3-letter code, e.g. USD, EUR, SGD, JPY" value="USD" autocapitalize="characters"></label>
+      <label>Currency<input name="currency" maxlength="3" pattern="[A-Za-z]{3}" title="3-letter code, e.g. USD, EUR, SGD, JPY" value="USD" autocapitalize="characters" list="currencyList" autocomplete="off"></label>
+      <datalist id="currencyList"></datalist>
+      <p class="hint" id="currencyNote" hidden>The currency can't be changed once a trip has expenses (amounts aren't converted).</p>
       <fieldset>
         <legend>Who's on this trip?</legend>
         <div id="tripMembersPick" class="checks"></div>

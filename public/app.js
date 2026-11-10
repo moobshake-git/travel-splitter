@@ -25,7 +25,7 @@ async function api(method, url, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !url.startsWith('/api/auth/')) { showAuth(); throw new Error('Please log in'); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
   return data;
 }
 
@@ -217,6 +217,11 @@ $('#peopleList').addEventListener('click', async (ev) => {
 });
 
 // ---------- trip CRUD ----------
+// Currency suggestions for the trip form (ISO 4217 codes the browser knows).
+try {
+  $('#currencyList').innerHTML = Intl.supportedValuesOf('currency').map((c) => `<option value="${c}">`).join('');
+} catch { /* older browser: free text still works */ }
+
 function openTrip(t) {
   if (!state.people.length) { toast('Add some people first'); openPerson(); return; }
   state.editing.trip = t || null;
@@ -224,6 +229,10 @@ function openTrip(t) {
   $('#tripDialogTitle').textContent = t ? 'Edit trip' : 'New trip';
   f.name.value = t?.name || '';
   f.currency.value = t?.currency || 'USD';
+  // Amounts aren't converted, so the currency is fixed once a trip has expenses (#18).
+  const locked = !!t && t.id === state.tripId && state.expenses.length > 0;
+  f.currency.disabled = locked;
+  $('#currencyNote').hidden = !locked;
   const members = new Set(t ? t.memberIds : state.people.map((p) => p.id));
   const creator = t ? t.createdBy : state.me;
   // You can't remove yourself, and nobody can remove the trip's creator (#3).
@@ -238,7 +247,11 @@ function openTrip(t) {
   $('#tripDialog').showModal();
 }
 $('#newTripBtn').onclick = () => openTrip();
-$('#editTripBtn').onclick = () => openTrip(trip());
+// Reload first, so the form starts from the latest version of the trip (#18).
+$('#editTripBtn').onclick = async () => {
+  try { await loadAll(); } catch (e) { toast(e.message); return; }
+  openTrip(trip());
+};
 $('#tripForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = ev.target;
@@ -247,14 +260,22 @@ $('#tripForm').addEventListener('submit', async (ev) => {
     currency: f.currency.value.toUpperCase(),
     memberIds: [...$('#tripMembersPick').querySelectorAll('input:checked')].map((i) => i.value),
   };
+  const t = state.editing.trip;
+  if (t) body.expectedUpdatedAt = t.updatedAt || t.createdAt || null;
   try {
-    const t = state.editing.trip;
     const saved = t ? await api('PUT', `/api/trips/${t.id}`, body) : await api('POST', '/api/trips', body);
     state.tripId = saved.id;
     $('#tripDialog').close();
     await loadAll();
     toast(t ? 'Trip updated' : 'Trip created');
-  } catch (e) { $('#tripError').textContent = e.message; }
+  } catch (e) {
+    if (e.status === 409) {
+      // Someone else saved first: reload and show their version so nothing gets undone.
+      await loadAll();
+      openTrip(trip());
+    }
+    $('#tripError').textContent = e.message;
+  }
 });
 $('#deleteTripBtn').onclick = async () => {
   const t = trip();
