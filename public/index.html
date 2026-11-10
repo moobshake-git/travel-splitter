@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Splitter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Login / sign-up screen -->
+  <div id="authScreen" class="auth-screen" hidden>
+    <div class="auth-card">
+      <div class="brand big">✈️ Travel Splitter</div>
+      <div class="seg auth-tabs" id="authTabs">
+        <button type="button" data-tab="login" class="on">Log in</button>
+        <button type="button" data-tab="register">Create account</button>
+      </div>
+
+      <form id="loginForm" class="auth-form">
+        <label>Username<input name="username" required autocomplete="username" autocapitalize="none"></label>
+        <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+        <p class="error" id="loginError"></p>
+        <button class="btn primary">Log in</button>
+      </form>
+
+      <form id="registerForm" class="auth-form" hidden>
+        <label>Your name<input name="name" required maxlength="80" autocomplete="name" placeholder="As your friends know you"></label>
+        <label>Choose a username<input name="username" required autocomplete="username" autocapitalize="none" placeholder="e.g. alex"></label>
+        <label>Password<input name="password" type="password" required minlength="6" autocomplete="new-password"></label>
+        <label>Confirm password<input name="confirm" type="password" required minlength="6" autocomplete="new-password"></label>
+        <p class="error" id="registerError"></p>
+        <button class="btn primary">Create account</button>
+      </form>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">✈️ Travel Splitter</div>
+    <div class="account">
+      <span class="muted">Signed in as</span>
+      <b id="meName"></b>
+      <button class="btn small ghost" id="passwordBtn">Change password</button>
+      <button class="btn small" id="logoutBtn">Log out</button>
+    </div>
+  </header>
+
+  <div class="layout" id="appShell">
+    <aside class="sidebar">
+      <section>
+        <div class="section-head">
+          <h2>Trips</h2>
+          <button class="btn small" id="newTripBtn">+ New</button>
+        </div>
+        <ul id="tripList" class="list"></ul>
+      </section>
+      <section>
+        <div class="section-head">
+          <h2>People <span id="peopleCount" class="muted"></span></h2>
+          <button class="btn small" id="newPersonBtn">+ Add</button>
+        </div>
+        <ul id="peopleList" class="list"></ul>
+      </section>
+    </aside>
+
+    <main id="main">
+      <div id="emptyState" class="empty">
+        <h1>Welcome 👋</h1>
+        <p>1. Add your travel buddies on the left (up to 10) — when they sign up with the same name, they take over that spot.<br>2. Create a trip and pick who's on it.<br>3. Log expenses — split evenly or assign amounts. Balances update automatically.</p>
+      </div>
+
+      <div id="tripView" hidden>
+        <div class="trip-head">
+          <div>
+            <h1 id="tripName"></h1>
+            <div id="tripMembers" class="muted"></div>
+          </div>
+          <div class="actions">
+            <button class="btn ghost" id="editTripBtn">Edit trip</button>
+            <button class="btn danger ghost" id="deleteTripBtn">Delete trip</button>
+            <button class="btn primary" id="addExpenseBtn">+ Add expense</button>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card stat"><div class="label">Trip total</div><div class="value" id="statTotal"></div></div>
+          <div class="card stat"><div class="label">Expenses</div><div class="value" id="statCount"></div></div>
+          <div class="card stat"><div class="label" id="statMineLabel">Your balance</div><div class="value" id="statMine"></div></div>
+        </div>
+
+        <div class="grid2">
+          <section class="card">
+            <h2>Balances</h2>
+            <table class="table">
+              <thead><tr><th>Person</th><th class="num">Paid</th><th class="num">Share</th><th class="num">Balance</th></tr></thead>
+              <tbody id="balanceBody"></tbody>
+            </table>
+          </section>
+          <section class="card">
+            <h2>Settle up</h2>
+            <ul id="transferList" class="transfers"></ul>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="section-head">
+            <h2>Expenses</h2>
+            <input id="search" class="search" placeholder="Search…" type="search">
+          </div>
+          <div id="expenseList"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Person dialog -->
+  <dialog id="personDialog">
+    <form method="dialog" id="personForm">
+      <h2 id="personDialogTitle">Add person</h2>
+      <label>Name<input name="name" required maxlength="80" autocomplete="off"></label>
+      <p class="error" id="personError"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Trip dialog -->
+  <dialog id="tripDialog">
+    <form method="dialog" id="tripForm">
+      <h2 id="tripDialogTitle">New trip</h2>
+      <label>Trip name<input name="name" required maxlength="80" autocomplete="off" placeholder="e.g. Tokyo 2026"></label>
+      <label>Currency<input name="currency" maxlength="8" value="USD"></label>
+      <fieldset>
+        <legend>Who's on this trip?</legend>
+        <div id="tripMembersPick" class="checks"></div>
+      </fieldset>
+      <p class="error" id="tripError"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Expense dialog -->
+  <dialog id="expenseDialog" class="wide">
+    <form method="dialog" id="expenseForm">
+      <h2 id="expenseDialogTitle">Add expense</h2>
+      <div class="row">
+        <label class="grow">Description<input name="description" required maxlength="80" autocomplete="off" placeholder="e.g. Dinner at Ichiran"></label>
+        <label>Amount<input name="amount" required type="number" step="0.01" min="0.01" inputmode="decimal"></label>
+      </div>
+      <div class="row">
+        <label class="grow">Paid by<select name="paidBy"></select></label>
+        <label>Date<input name="date" type="date"></label>
+        <label>Category
+          <select name="category">
+            <option>Food</option><option>Lodging</option><option>Transport</option>
+            <option>Activities</option><option>Shopping</option><option>Other</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="split-head">
+        <span>Split</span>
+        <div class="seg" id="splitMode">
+          <button type="button" data-mode="equal">Evenly</button>
+          <button type="button" data-mode="exact">Exact amounts</button>
+          <button type="button" data-mode="percent">Percent</button>
+          <button type="button" data-mode="shares">Shares</button>
+        </div>
+      </div>
+      <p class="hint" id="splitHint"></p>
+      <div id="splitRows" class="split-rows"></div>
+      <div class="split-foot" id="splitFoot"></div>
+
+      <label>Notes<textarea name="notes" rows="2" maxlength="500"></textarea></label>
+      <p class="error" id="expenseError"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button class="btn primary" value="save">Save expense</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Change password dialog -->
+  <dialog id="passwordDialog">
+    <form method="dialog" id="passwordForm">
+      <h2>Change password</h2>
+      <label>Current password<input name="current" type="password" required autocomplete="current-password"></label>
+      <label>New password<input name="next" type="password" required minlength="6" autocomplete="new-password"></label>
+      <label>Confirm new password<input name="confirm" type="password" required minlength="6" autocomplete="new-password"></label>
+      <p class="error" id="passwordError"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button class="btn primary" value="save">Update</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
