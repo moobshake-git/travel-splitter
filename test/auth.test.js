@@ -40,14 +40,14 @@ test('register validates username, password and name', async () => {
   }
 });
 
-test('register rejects a taken username and a name that already has an account', async () => {
+test('register rejects a taken username and a name already in the group', async () => {
   await signup('Bea', { username: 'bea' });
   let r = await request('POST', '/api/auth/register', { body: { name: 'Other', username: 'BEA', password: 'secret123' } });
   assert.equal(r.status, 400);
   assert.match(r.body.error, /username is taken/);
   r = await request('POST', '/api/auth/register', { body: { name: 'bea', username: 'bea2', password: 'secret123' } });
   assert.equal(r.status, 400);
-  assert.match(r.body.error, /already has an account/);
+  assert.match(r.body.error, /already in the group/);
 });
 
 test('login succeeds with the right password and fails with the wrong one', async () => {

@@ -11,7 +11,9 @@ before(async () => {
 test('add, list, rename and remove an invited person', async () => {
   let r = await ana.post('/api/people', { name: ' Zoe ' });
   assert.equal(r.status, 201);
-  assert.deepEqual(Object.keys(r.body).sort(), ['hasAccount', 'id', 'name', 'username']);
+  assert.deepEqual(Object.keys(r.body).sort(), ['canManage', 'hasAccount', 'id', 'inviteCode', 'name', 'username']);
+  assert.equal(r.body.canManage, true, 'whoever adds an invitee can manage them');
+  assert.match(r.body.inviteCode, /^[A-HJ-NP-Z2-9]{8}$/);
   assert.equal(r.body.hasAccount, false);
   const id = r.body.id;
   assert.ok((await ana.get('/api/people')).body.some((p) => p.id === id));
