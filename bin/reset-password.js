@@ -2,6 +2,12 @@
 // Reset a user's password: node bin/reset-password.js <username> <new-password>
 // (also available as: node server.js reset-password <username> <new-password>)
 function resetPassword([username, password]) {
+  // A running server would ignore this change and later write its old copy back (#17).
+  const holder = require('../lib/lock').lockHolder();
+  if (holder) {
+    console.error(`The Travel Splitter server is running (pid ${holder}). Stop it, run this again, then restart it.`);
+    return 1;
+  }
   let db, save, hashPassword, revokeSessions;
   try {
     ({ db, save } = require('../lib/db'));

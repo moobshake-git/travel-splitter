@@ -15,7 +15,14 @@ try {
 }
 
 if (require.main === module) {
-  const PORT = Number(process.argv[2]) || Number(process.env.PORT) || 3000;
-  server.listen(PORT, () => console.log(`Travel Splitter running at http://localhost:${PORT}`));
+  const lock = require('./lib/lock');
+  const holder = lock.acquire();
+  if (holder) {
+    console.error(`Another Travel Splitter server (pid ${holder}) is already using this data file. Stop it first.`);
+    process.exit(1);
+  }
+  const arg = process.argv[2];
+  const PORT = /^\d+$/.test(arg || '') ? Number(arg) : Number(process.env.PORT) || 3000; // 0 = any free port
+  server.listen(PORT, () => console.log(`Travel Splitter running at http://localhost:${server.address().port}`));
 }
 module.exports = { server };

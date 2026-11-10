@@ -36,10 +36,13 @@ Tests start the real server on a random port against a throwaway data file
   take over that spot, with its trips and expenses. Each code works once.
 - Passwords are stored hashed (scrypt), never in plain text. Sessions last 30 days.
 - 5 wrong passwords in a row locks that username for 1 minute.
-- **Forgot password?** Whoever runs the server can reset it:
+- **Forgot password?** Whoever runs the server can reset it. **Stop the server first**
+  (the command refuses to run while it's up, because the running server would overwrite
+  the change), then:
   ```bash
   node server.js reset-password <username> <new-password>
   ```
+  This also signs that user out everywhere. Start the server again afterwards.
 
 ## Who can do what
 - You only see trips you are on.
