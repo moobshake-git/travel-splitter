@@ -19,7 +19,7 @@
       <form id="loginForm" class="auth-form">
         <label>Username<input name="username" required autocomplete="username" autocapitalize="none"></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
-        <p class="error" id="loginError"></p>
+        <p class="error" id="loginError" role="alert"></p>
         <button class="btn primary">Log in</button>
       </form>
 
@@ -29,7 +29,7 @@
         <label>Choose a username<input name="username" required autocomplete="username" autocapitalize="none" placeholder="e.g. alex"></label>
         <label>Password<input name="password" type="password" required minlength="6" autocomplete="new-password"></label>
         <label>Confirm password<input name="confirm" type="password" required minlength="6" autocomplete="new-password"></label>
-        <p class="error" id="registerError"></p>
+        <p class="error" id="registerError" role="alert"></p>
         <button class="btn primary">Create account</button>
       </form>
     </div>
@@ -38,9 +38,9 @@
   <header class="topbar">
     <div class="brand">✈️ Travel Splitter</div>
     <div class="account">
-      <span class="muted">Signed in as</span>
+      <span class="muted signed-in-as">Signed in as</span>
       <b id="meName"></b>
-      <button class="btn small ghost" id="passwordBtn">Change password</button>
+      <button class="btn small ghost" id="passwordBtn" aria-label="Change password"><span class="wide-only">Change password</span><span class="narrow-only">Password</span></button>
       <button class="btn small" id="logoutBtn">Log out</button>
     </div>
   </header>
@@ -118,7 +118,7 @@
     <form method="dialog" id="personForm">
       <h2 id="personDialogTitle">Add person</h2>
       <label>Name<input name="name" required maxlength="80" autocomplete="off"></label>
-      <p class="error" id="personError"></p>
+      <p class="error" id="personError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button class="btn primary" value="save">Save</button>
@@ -138,7 +138,7 @@
         <legend>Who's on this trip?</legend>
         <div id="tripMembersPick" class="checks"></div>
       </fieldset>
-      <p class="error" id="tripError"></p>
+      <p class="error" id="tripError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button class="btn primary" value="save">Save</button>
@@ -179,7 +179,7 @@
       <div class="split-foot" id="splitFoot"></div>
 
       <label>Notes<textarea name="notes" rows="2" maxlength="500"></textarea></label>
-      <p class="error" id="expenseError"></p>
+      <p class="error" id="expenseError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button class="btn primary" value="save">Save expense</button>
@@ -207,7 +207,7 @@
       <label>Current password<input name="current" type="password" required autocomplete="current-password"></label>
       <label>New password<input name="next" type="password" required minlength="6" autocomplete="new-password"></label>
       <label>Confirm new password<input name="confirm" type="password" required minlength="6" autocomplete="new-password"></label>
-      <p class="error" id="passwordError"></p>
+      <p class="error" id="passwordError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button class="btn primary" value="save">Update</button>
@@ -215,7 +215,19 @@
     </form>
   </dialog>
 
-  <div id="toast" class="toast" hidden></div>
+  <!-- Confirm dialog (replaces window.confirm) -->
+  <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+    <form id="confirmForm" method="dialog">
+      <h2 id="confirmTitle">Are you sure?</h2>
+      <p id="confirmText" class="flush"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="confirmOk" value="ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="shared.js"></script>
   <script src="app.js"></script>
 </body>
