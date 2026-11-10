@@ -200,6 +200,8 @@ function validateExpense(body, user, existing) {
   if (!trip.memberIds.includes(body.paidBy)) bad('Payer must be on this trip');
   const date = typeof body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
     ? body.date : new Date().toISOString().slice(0, 10);
+  // The format check alone lets through dates like 2026-02-31 or 2026-13-45. Round-trip to be sure it's real.
+  if (Number.isNaN(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) bad('Date is not a valid calendar date');
   const category = typeof body.category === 'string' ? body.category.slice(0, 40) : 'Other';
   const splitMode = body.splitMode;
   const shares = computeShares(amountCents, splitMode, body.splits, trip);
