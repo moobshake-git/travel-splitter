@@ -17,7 +17,7 @@ test('a JSON body that is not an object is a 400', async () => {
 });
 
 test('an empty body still counts as {} (e.g. logout)', async () => {
-  assert.equal((await request('POST', '/api/auth/logout')).status, 201);
+  assert.equal((await request('POST', '/api/auth/logout')).status, 200);
 });
 
 test('null or non-object split entries are a 400', async () => {

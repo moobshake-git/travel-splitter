@@ -15,7 +15,7 @@ test("changing your password signs out your other sessions but keeps this one an
   const anaPhone = await login('ana', 'oldpass1');
 
   const r = await ana.post('/api/auth/password', { current: 'oldpass1', next: 'newpass1' });
-  assert.equal(r.status, 201);
+  assert.equal(r.status, 200);
 
   assert.equal((await request('GET', '/api/trips', { cookie: anaPhone })).status, 401, 'old session is revoked');
   assert.equal((await ana.get('/api/trips')).status, 200, 'the session that changed it stays signed in');

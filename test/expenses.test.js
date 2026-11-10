@@ -55,7 +55,7 @@ test('exact, percent and shares split modes', async () => {
 test('expense validation', async () => {
   const cases = [
     [{ description: '' }, /Description is required/],
-    [{ amount: 'abc' }, /amount must be a number/],
+    [{ amount: 'abc' }, /Amount must be a number like 12/],
     [{ amount: 0 }, /more than zero/],
     [{ paidBy: 'nobody' }, /Payer must be on this trip/],
     [{ splits: [] }, /at least one person/],
@@ -71,11 +71,30 @@ test('expense validation', async () => {
   assert.equal((await add(ana, { tripId: 'nope' })).status, 404);
 });
 
-test('missing date defaults to today; bad category/notes fall back', async () => {
-  const r = await add(ana, { date: 'yesterday', category: 5, notes: 7 });
-  assert.equal(r.body.date, new Date().toISOString().slice(0, 10));
+test('missing date defaults to today and missing category to Other; bad notes are dropped', async () => {
+  const r = await add(ana, { date: 'yesterday', notes: 7 });
+  assert.equal(r.body.date, require('../public/shared').localToday());
   assert.equal(r.body.category, 'Other');
   assert.equal(r.body.notes, '');
+});
+
+test('category must come from the shared list (#21)', async () => {
+  for (const category of ['Food', 'Lodging', 'Other']) assert.equal((await add(ana, { category })).body.category, category);
+  for (const category of [5, 'Snacks', 'x'.repeat(50)]) {
+    const r = await add(ana, { category });
+    assert.equal(r.status, 400, String(category));
+    assert.match(r.body.error, /Category must be one of: Food, Lodging/);
+  }
+});
+
+test('an older expense keeps a category that is no longer in the list, unless changed', async () => {
+  const { db } = require('../lib/db');
+  const e = (await add(ana, { category: 'Food' })).body;
+  db.expenses.find((x) => x.id === e.id).category = 'Snacks';
+  const body = { description: 'Thing', amount: 10, paidBy: ana.user.id, splitMode: 'equal', splits: everyone() };
+  assert.equal((await ana.put(`/api/expenses/${e.id}`, { ...body, category: 'Snacks' })).body.category, 'Snacks');
+  assert.equal((await ana.put(`/api/expenses/${e.id}`, { ...body, category: 'Drinks' })).status, 400);
+  assert.equal((await ana.put(`/api/expenses/${e.id}`, { ...body, category: 'Food' })).body.category, 'Food');
 });
 
 test('only the adder or payer can edit or delete', async () => {

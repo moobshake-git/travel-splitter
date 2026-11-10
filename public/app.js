@@ -1,6 +1,11 @@
-// Travel Splitter front end (vanilla JS).
+// Travel Splitter front end (vanilla JS). Split math comes from shared.js (window.Shared).
+const { distributeUnits, percentTotalOk, parseAmount, currencyDigits, unitCents, localToday, CATEGORIES, DEFAULT_CATEGORY } = window.Shared;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Icon-only button with a real accessible name (the emoji itself is hidden from screen
+// readers, which would read "wastebasket") (#10).
+const iconBtn = (icon, label, attrs) =>
+  `<button type="button" class="icon-btn" aria-label="${esc(label)}" title="${esc(label)}" ${attrs}><span aria-hidden="true">${icon}</span></button>`;
 
 const state = {
   people: [],
@@ -8,6 +13,7 @@ const state = {
   tripId: localStorage.getItem('tripId') || null,
   me: '',        // logged-in person's id
   user: null,    // logged-in person
+  maxPeople: 10, // group size limit, from /api/auth/me
   expenses: [],
   summary: null,
   editing: { person: null, trip: null, expense: null },
@@ -22,13 +28,45 @@ async function api(method, url, body) {
     body: method === 'GET' ? undefined : JSON.stringify(body || {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !url.startsWith('/api/auth/')) { showAuth(); throw new Error('Please log in'); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (res.status === 401 && !url.startsWith('/api/auth/')) {
+    showAuth('Your session has ended. Please log in again.');
+    throw Object.assign(new Error('Please log in'), { status: 401, sessionEnded: true });
+  }
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
   return data;
+}
+
+// Run an action with its button disabled (and aria-busy), so a double click can't
+// submit twice (#7).
+async function busy(btn, fn) {
+  if (btn?.disabled) return;
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+  try {
+    return await fn();
+  } finally {
+    if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+  }
+}
+
+// Show an error where the user is looking: in the open dialog's error line, or as a toast.
+// Errors outside a form (or "not found / not allowed / changed meanwhile") usually mean our
+// copy is out of date, so reload it from the server (#7).
+async function showError(e, el) {
+  if (e.sessionEnded) return; // already back on the login screen
+  if (el) el.textContent = e.message; else toast(e.message);
+  if (state.me && (!el || [403, 404, 409].includes(e.status))) {
+    try { await loadAll(); } catch { /* reported already */ }
+  }
 }
 
 // ---------- formatting ----------
 const trip = () => state.trips.find((t) => t.id === state.tripId);
+// Recorded payments ("Ben paid Ana back") live alongside expenses but aren't spending (#19).
+const isPayment = (e) => e.kind === 'settlement';
+// Amount typed in a form → hundredths, or 0 while it isn't a valid amount yet (for previews).
+const amountCents = (v, currency = trip()?.currency) => parseAmount(v, currency).cents || 0;
+// Hundredths → the text to put in an amount input (no decimals for JPY etc.).
+const amountText = (cents, currency = trip()?.currency) => (cents / 100).toFixed(currencyDigits(currency));
 const personName = (id) => state.people.find((p) => p.id === id)?.name ?? 'Unknown';
 function money(cents, currency = trip()?.currency || 'USD') {
   const v = cents / 100;
@@ -40,11 +78,41 @@ function money(cents, currency = trip()?.currency || 'USD') {
     return `${code} ${v.toFixed(2)}`;
   }
 }
+// #toast is a polite live region that stays in the page, so screen readers announce each
+// message; it's only visually hidden while empty (#10).
 function toast(msg) {
   const t = $('#toast');
-  t.textContent = msg; t.hidden = false;
+  t.textContent = msg;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), 2600);
+  toast.timer = setTimeout(() => (t.textContent = ''), 4000);
+}
+
+// Move focus somewhere sensible after a re-render destroyed the button that had it (#10).
+// Tries each selector in turn and focuses the first visible match.
+function focusFirst(...selectors) {
+  requestAnimationFrame(() => {
+    for (const sel of selectors) {
+      const el = sel && $(sel);
+      if (el && !el.closest('[hidden]') && !el.disabled) { el.focus(); return; }
+    }
+  });
+}
+
+// A styled, accessible replacement for confirm(). Resolves true if confirmed (#10).
+function confirmDialog(text, { title = 'Are you sure?', ok = 'OK', danger = false } = {}) {
+  const d = $('#confirmDialog');
+  const okBtn = $('#confirmOk');
+  $('#confirmTitle').textContent = title;
+  $('#confirmText').textContent = text;
+  okBtn.textContent = ok;
+  okBtn.classList.toggle('danger-fill', danger);
+  d.returnValue = '';
+  return new Promise((resolve) => {
+    d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true });
+    d.showModal();
+    // Destructive actions start on Cancel, so Enter doesn't delete by accident.
+    (danger ? d.querySelector('[data-close]') : okBtn).focus();
+  });
 }
 
 // ---------- loading ----------
@@ -56,29 +124,39 @@ async function loadAll() {
 }
 async function loadTrip() {
   if (!state.tripId) { state.expenses = []; state.summary = null; return; }
-  [state.expenses, state.summary] = await Promise.all([
-    api('GET', `/api/trips/${state.tripId}/expenses`),
-    api('GET', `/api/trips/${state.tripId}/summary`),
-  ]);
+  [state.expenses, state.summary] = await fetchTrip(state.tripId);
+}
+const fetchTrip = (id) => Promise.all([api('GET', `/api/trips/${id}/expenses`), api('GET', `/api/trips/${id}/summary`)]);
+
+// Switch trips only once the new one has loaded, so a failure (e.g. you were removed from it)
+// can't leave the old trip's data on screen under the new trip's id (#7).
+async function selectTrip(id) {
+  const [expenses, summary] = await fetchTrip(id);
+  Object.assign(state, { tripId: id, expenses, summary });
+  render();
+  focusFirst(`.trip-btn[data-trip="${id}"]`);
+  // On phones the trip is below the trip strip: bring it into view (#10).
+  if (matchMedia('(max-width: 820px)').matches) $('#tripView').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ---------- render ----------
 function render() {
-  try { if (state.tripId) localStorage.setItem('tripId', state.tripId); else localStorage.removeItem('tripId'); } catch {}
+  try { if (state.tripId) localStorage.setItem('tripId', state.tripId); else localStorage.removeItem('tripId'); } catch { /* storage blocked: just don't remember the trip */ }
 
   $('#meName').textContent = state.people.find((p) => p.id === state.me)?.name || state.user?.name || '';
 
   // People
-  $('#peopleCount').textContent = `(${state.people.length}/10)`;
-  $('#newPersonBtn').disabled = state.people.length >= 10;
+  $('#peopleCount').textContent = `(${state.people.length}/${state.maxPeople})`;
+  $('#newPersonBtn').disabled = state.people.length >= state.maxPeople;
+  $('#maxPeopleNote').textContent = state.maxPeople;
   $('#peopleList').innerHTML = state.people.length
     ? state.people.map((p) => `
       <li>
         <span>${esc(p.name)}${p.id === state.me ? ' <span class="tag">you</span>' : p.hasAccount ? '' : ' <span class="tag" title="Hasn\'t created an account yet">invited</span>'}</span>
         <span class="row-actions">
-          ${p.inviteCode ? `<button class="icon-btn" title="Show invite code" data-invite-person="${p.id}">🔗</button>` : ''}
-          ${p.id === state.me || p.canManage ? `<button class="icon-btn" title="Rename" data-edit-person="${p.id}">✎</button>` : ''}
-          ${p.canManage ? `<button class="icon-btn" title="Remove" data-del-person="${p.id}">🗑</button>` : ''}
+          ${p.inviteCode ? iconBtn('🔗', `Show invite code for ${p.name}`, `data-invite-person="${p.id}"`) : ''}
+          ${p.id === state.me || p.canManage ? iconBtn('✎', `Rename ${p.name}`, `data-edit-person="${p.id}"`) : ''}
+          ${p.canManage ? iconBtn('🗑', `Remove ${p.name}`, `data-del-person="${p.id}"`) : ''}
         </span>
       </li>`).join('')
     : `<li class="empty-note">No one yet — add your travel group.</li>`;
@@ -86,9 +164,10 @@ function render() {
   // Trips
   $('#tripList').innerHTML = state.trips.length
     ? state.trips.map((t) => `
-      <li class="clickable ${t.id === state.tripId ? 'active' : ''}" data-trip="${t.id}">
-        <span>${esc(t.name)}</span><span class="muted">${t.memberIds.length} 👤</span>
-      </li>`).join('')
+      <li><button type="button" class="trip-btn" data-trip="${t.id}" ${t.id === state.tripId ? 'aria-current="true"' : ''}>
+        <span>${esc(t.name)}</span>
+        <span class="muted">${t.memberIds.length}<span aria-hidden="true"> 👤</span><span class="sr-only"> people</span></span>
+      </button></li>`).join('')
     : `<li class="empty-note">No trips yet.</li>`;
 
   const t = trip();
@@ -103,7 +182,7 @@ function renderTrip(t) {
   $('#deleteTripBtn').hidden = !!t.createdBy && t.createdBy !== state.me;
   $('#tripMembers').textContent = `${t.currency} · ${t.memberIds.map(personName).join(', ')}`;
   $('#statTotal').textContent = money(s.totalCents);
-  $('#statCount').textContent = state.expenses.length;
+  $('#statCount').textContent = state.expenses.filter((e) => !isPayment(e)).length;
 
   const mine = s.people.find((p) => p.personId === state.me);
   if (mine) {
@@ -112,15 +191,16 @@ function renderTrip(t) {
     $('#statMine').innerHTML = `<span class="${b > 0 ? 'pos' : b < 0 ? 'neg' : ''}">${money(Math.abs(b))}</span>`;
   } else {
     $('#statMineLabel').textContent = 'Your balance';
-    $('#statMine').innerHTML = `<span class="muted" style="font-size:.9rem;font-weight:400">Not on this trip</span>`;
+    $('#statMine').innerHTML = `<span class="muted stat-note">Not on this trip</span>`;
   }
 
   $('#balanceBody').innerHTML = s.people.map((p) => {
     const b = p.balanceCents;
     const cls = b > 0 ? 'pos' : b < 0 ? 'neg' : 'muted';
     const label = b > 0 ? `gets back ${money(b)}` : b < 0 ? `owes ${money(-b)}` : 'settled';
+    const moved = [p.sentCents && `paid back ${money(p.sentCents)}`, p.receivedCents && `got back ${money(p.receivedCents)}`].filter(Boolean).join(', ');
     return `<tr>
-      <td>${esc(personName(p.personId))}${p.personId === state.me ? ' <span class="tag">you</span>' : ''}</td>
+      <td>${esc(personName(p.personId))}${p.personId === state.me ? ' <span class="tag">you</span>' : ''}${moved ? `<div class="sub">${moved}</div>` : ''}</td>
       <td class="num">${money(p.paidCents)}</td>
       <td class="num">${money(p.owedCents)}</td>
       <td class="num ${cls}">${label}</td>
@@ -128,38 +208,61 @@ function renderTrip(t) {
   }).join('');
 
   $('#transferList').innerHTML = s.transfers.length
-    ? s.transfers.map((x) => `
-      <li><span><b>${esc(personName(x.from))}</b> pays <b>${esc(personName(x.to))}</b></span><span class="amt">${money(x.cents)}</span></li>`).join('')
-    : `<li class="muted" style="background:none;padding:0">${state.expenses.length ? 'Everyone is settled up 🎉' : 'Add an expense to see who owes whom.'}</li>`;
+    ? s.transfers.map((x, i) => `
+      <li><span><b>${esc(personName(x.from))}</b> pays <b>${esc(personName(x.to))}</b></span>
+        <span class="amt">${money(x.cents)}</span>
+        ${x.from === state.me || x.to === state.me ? `<button class="btn small" data-mark-paid="${i}">Mark paid</button>` : ''}</li>`).join('')
+    : `<li class="muted transfers-note">${state.expenses.length ? 'Everyone is settled up 🎉' : 'Add an expense to see who owes whom.'}</li>`;
 
   renderExpenses();
 }
 
 const MODE_LABEL = { equal: 'split evenly', exact: 'exact amounts', percent: 'by percent', shares: 'by shares' };
+// Everything a search can match: description, category, notes, who paid and who shared it (#20).
+const searchText = (e) => [e.description, e.category, e.notes, personName(e.paidBy), ...e.shares.map((s) => personName(s.personId))]
+  .join('\n').toLowerCase();
 function renderExpenses() {
-  const q = $('#search').value.trim().toLowerCase();
-  const list = state.expenses.filter((e) => !q ||
-    e.description.toLowerCase().includes(q) || e.category.toLowerCase().includes(q) ||
-    personName(e.paidBy).toLowerCase().includes(q));
+  const search = $('#search');
+  // A search belongs to one trip: start fresh when you switch (#20).
+  if (search.dataset.forTrip !== state.tripId) { search.value = ''; search.dataset.forTrip = state.tripId || ''; }
+  const q = search.value.trim().toLowerCase();
+  const list = state.expenses.filter((e) => !q || searchText(e).includes(q));
   if (!list.length) {
-    $('#expenseList').innerHTML = `<p class="muted">${state.expenses.length ? 'No matches.' : 'No expenses yet. Click “+ Add expense”.'}</p>`;
+    $('#expenseList').innerHTML = !state.expenses.length
+      ? '<p class="muted">No expenses yet. Click “+ Add expense”.</p>'
+      : `<p class="muted">No matches for “${esc(search.value.trim())}”. <button type="button" class="btn small" id="clearSearchBtn">Clear search</button></p>`;
     return;
   }
   $('#expenseList').innerHTML = list.map((e) => {
     const d = new Date(e.date + 'T00:00:00');
     const mon = d.toLocaleString(undefined, { month: 'short' });
+    if (isPayment(e)) {
+      const to = e.shares[0]?.personId;
+      return `<div class="expense payment">
+        <div class="date">${mon}<b>${d.getDate()}</b></div>
+        <div>
+          <div class="title">💸 ${esc(personName(e.paidBy))} paid ${esc(personName(to))}<span class="tag">payment</span></div>
+          <div class="meta">Settling up${e.createdBy ? ' · recorded by ' + esc(personName(e.createdBy)) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
+        </div>
+        <div class="amount">${money(e.amountCents)}</div>
+        <div class="row-actions">
+          ${e.canEdit ? iconBtn('🗑', `Delete payment from ${personName(e.paidBy)} to ${personName(to)}`, `data-del-exp="${e.id}"`) : ''}
+        </div>
+      </div>`;
+    }
     const who = e.shares.map((sh) => `${esc(personName(sh.personId))} ${money(sh.cents)}`).join(' · ');
     return `<div class="expense">
       <div class="date">${mon}<b>${d.getDate()}</b></div>
       <div>
         <div class="title">${esc(e.description)}<span class="tag">${esc(e.category)}</span></div>
-        <div class="meta">${esc(personName(e.paidBy))} paid · ${MODE_LABEL[e.splitMode]} among ${e.shares.length}${e.createdBy && e.createdBy !== e.paidBy ? ' · added by ' + esc(personName(e.createdBy)) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
+        <div class="meta">${esc(personName(e.paidBy))} paid · ${MODE_LABEL[e.splitMode]} among ${e.shares.length}${e.createdBy && e.createdBy !== e.paidBy ? ' · added by ' + esc(personName(e.createdBy)) : ''}${e.updatedBy && e.updatedBy !== e.createdBy ? ' · edited by ' + esc(personName(e.updatedBy)) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
         <div class="split-detail">${who}</div>
       </div>
       <div class="amount">${money(e.amountCents)}</div>
       <div class="row-actions">
-        ${e.canEdit ? `<button class="icon-btn" title="Edit" data-edit-exp="${e.id}">✎</button>
-        <button class="icon-btn" title="Delete" data-del-exp="${e.id}">🗑</button>` : `<span class="icon-btn" title="Only the person who added or paid can change this">🔒</span>`}
+        ${e.canEdit ? `${iconBtn('✎', `Edit ${e.description}`, `data-edit-exp="${e.id}"`)}
+        ${iconBtn('🗑', `Delete ${e.description}`, `data-del-exp="${e.id}"`)}`
+    : `<span class="view-only" title="Only the person who added or paid can change this"><span aria-hidden="true">🔒</span> View only</span>`}
       </div>
     </div>`;
   }).join('');
@@ -176,18 +279,20 @@ function openPerson(p) {
   $('#personError').textContent = '';
   $('#personDialog').showModal();
 }
-$('#newPersonBtn').onclick = () => openPerson();
-$('#personForm').addEventListener('submit', async (ev) => {
+$('#newPersonBtn').addEventListener('click', () => openPerson());
+$('#personForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const name = ev.target.name.value;
-  try {
-    const p = state.editing.person;
-    const saved = p ? await api('PUT', `/api/people/${p.id}`, { name }) : await api('POST', '/api/people', { name });
-    $('#personDialog').close();
-    await loadAll();
-    if (p) toast('Renamed');
-    else showInvite(saved);
-  } catch (e) { $('#personError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      const p = state.editing.person;
+      const saved = p ? await api('PUT', `/api/people/${p.id}`, { name }) : await api('POST', '/api/people', { name });
+      $('#personDialog').close();
+      await loadAll();
+      if (p) { toast('Renamed'); focusFirst(`[data-edit-person="${p.id}"]`, '#newPersonBtn'); }
+      else showInvite(saved);
+    } catch (e) { showError(e, $('#personError')); }
+  });
 });
 const formatCode = (c) => (c ? `${c.slice(0, 4)}-${c.slice(4)}` : '');
 function showInvite(p) {
@@ -195,10 +300,10 @@ function showInvite(p) {
   $('#inviteCode').textContent = formatCode(p.inviteCode);
   $('#inviteDialog').showModal();
 }
-$('#copyInviteBtn').onclick = async () => {
+$('#copyInviteBtn').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('#inviteCode').textContent); toast('Invite code copied'); }
   catch { toast('Copy failed — select the code and copy it manually'); }
-};
+});
 $('#peopleList').addEventListener('click', async (ev) => {
   const edit = ev.target.closest('[data-edit-person]');
   const del = ev.target.closest('[data-del-person]');
@@ -207,13 +312,20 @@ $('#peopleList').addEventListener('click', async (ev) => {
   if (edit) openPerson(state.people.find((p) => p.id === edit.dataset.editPerson));
   if (del) {
     const p = state.people.find((x) => x.id === del.dataset.delPerson);
-    if (!confirm(`Remove ${p.name}? They'll be taken off any trips they're on.`)) return;
-    try { await api('DELETE', `/api/people/${p.id}`); await loadAll(); toast('Person removed'); }
-    catch (e) { alert(e.message); }
+    if (!(await confirmDialog(`They'll be taken off any trips they're on.`, { title: `Remove ${p.name}?`, ok: 'Remove', danger: true }))) return;
+    await busy(del, async () => {
+      try { await api('DELETE', `/api/people/${p.id}`); await loadAll(); toast('Person removed'); focusFirst('#newPersonBtn'); }
+      catch (e) { showError(e); }
+    });
   }
 });
 
 // ---------- trip CRUD ----------
+// Currency suggestions for the trip form (ISO 4217 codes the browser knows).
+try {
+  $('#currencyList').innerHTML = Intl.supportedValuesOf('currency').map((c) => `<option value="${c}">`).join('');
+} catch { /* older browser: free text still works */ }
+
 function openTrip(t) {
   if (!state.people.length) { toast('Add some people first'); openPerson(); return; }
   state.editing.trip = t || null;
@@ -221,6 +333,10 @@ function openTrip(t) {
   $('#tripDialogTitle').textContent = t ? 'Edit trip' : 'New trip';
   f.name.value = t?.name || '';
   f.currency.value = t?.currency || 'USD';
+  // Amounts aren't converted, so the currency is fixed once a trip has expenses (#18).
+  const locked = !!t && t.id === state.tripId && state.expenses.length > 0;
+  f.currency.disabled = locked;
+  $('#currencyNote').hidden = !locked;
   const members = new Set(t ? t.memberIds : state.people.map((p) => p.id));
   const creator = t ? t.createdBy : state.me;
   // You can't remove yourself, and nobody can remove the trip's creator (#3).
@@ -234,39 +350,60 @@ function openTrip(t) {
   $('#tripError').textContent = '';
   $('#tripDialog').showModal();
 }
-$('#newTripBtn').onclick = () => openTrip();
-$('#editTripBtn').onclick = () => openTrip(trip());
-$('#tripForm').addEventListener('submit', async (ev) => {
+$('#newTripBtn').addEventListener('click', () => openTrip());
+// Reload first, so the form starts from the latest version of the trip (#18).
+$('#editTripBtn').addEventListener('click', async () => {
+  try { await loadAll(); } catch (e) { toast(e.message); return; }
+  openTrip(trip());
+});
+$('#tripForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
-  const f = ev.target;
+  return busy(ev.submitter, () => saveTrip(ev.target));
+});
+async function saveTrip(f) {
   const body = {
     name: f.name.value,
     currency: f.currency.value.toUpperCase(),
     memberIds: [...$('#tripMembersPick').querySelectorAll('input:checked')].map((i) => i.value),
   };
+  const t = state.editing.trip;
+  if (t) body.expectedUpdatedAt = t.updatedAt || t.createdAt || null;
   try {
-    const t = state.editing.trip;
     const saved = t ? await api('PUT', `/api/trips/${t.id}`, body) : await api('POST', '/api/trips', body);
     state.tripId = saved.id;
     $('#tripDialog').close();
     await loadAll();
     toast(t ? 'Trip updated' : 'Trip created');
-  } catch (e) { $('#tripError').textContent = e.message; }
-});
-$('#deleteTripBtn').onclick = async () => {
+    focusFirst(t ? '#editTripBtn' : '#addExpenseBtn');
+  } catch (e) {
+    if (e.status === 409) {
+      // Someone else saved first: reload and show their version so nothing gets undone.
+      try { await loadAll(); openTrip(trip()); } catch { /* shown below */ }
+      $('#tripError').textContent = e.message;
+      return;
+    }
+    showError(e, $('#tripError'));
+  }
+}
+$('#deleteTripBtn').addEventListener('click', async (ev) => {
   const t = trip();
-  if (!confirm(`Delete "${t.name}" and all ${state.expenses.length} of its expenses? This can't be undone.`)) return;
-  await api('DELETE', `/api/trips/${t.id}`);
-  state.tripId = null;
-  await loadAll();
-  toast('Trip deleted');
-};
+  const btn = ev.currentTarget;
+  if (!(await confirmDialog(`It has ${state.expenses.length} expense${state.expenses.length === 1 ? '' : 's'}. This can't be undone.`,
+    { title: `Delete “${t.name}”?`, ok: 'Delete trip', danger: true }))) return;
+  await busy(btn, async () => {
+    try {
+      await api('DELETE', `/api/trips/${t.id}`);
+      state.tripId = null;
+      await loadAll();
+      toast('Trip deleted');
+      focusFirst('.trip-btn[aria-current]', '#newTripBtn');
+    } catch (e) { showError(e); }
+  });
+});
 $('#tripList').addEventListener('click', async (ev) => {
   const li = ev.target.closest('[data-trip]');
-  if (!li) return;
-  state.tripId = li.dataset.trip;
-  await loadTrip();
-  render();
+  if (!li || li.dataset.trip === state.tripId) return;
+  try { await selectTrip(li.dataset.trip); } catch (e) { showError(e); }
 });
 
 // ---------- expense CRUD + split editor ----------
@@ -276,17 +413,6 @@ const HINTS = {
   percent: 'Give each person a percentage. It must add up to 100%.',
   shares: 'Give weights, e.g. 2 for someone who had double. 0 = not included.',
 };
-
-// Mirror of the server's rounding so the preview matches what gets saved.
-function distribute(total, weights) {
-  const sum = weights.reduce((a, b) => a + b, 0);
-  if (sum <= 0) return weights.map(() => 0);
-  const raw = weights.map((w) => (total * w) / sum);
-  const fl = raw.map(Math.floor);
-  let left = total - fl.reduce((a, b) => a + b, 0);
-  raw.map((r, i) => [r - fl[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { fl[i]++; left--; } });
-  return fl;
-}
 
 function activeRows() {
   const t = trip();
@@ -308,7 +434,7 @@ function renderSplit() {
     const r = rows[id];
     const control = mode === 'equal'
       ? `<span></span>`
-      : `<input type="number" step="any" min="0" placeholder="0 ${unit}" data-split-val="${id}" value="${esc(r.value)}">`;
+      : `<input type="number" step="${mode === 'exact' ? 10 ** -currencyDigits(t.currency) : 'any'}" min="0" placeholder="0 ${unit}" data-split-val="${id}" value="${esc(r.value)}">`;
     return `<div class="split-row">
       <label class="who">${mode === 'equal' ? `<input type="checkbox" data-split-on="${id}" ${r.on ? 'checked' : ''}>` : ''}${esc(personName(id))}</label>
       ${control}
@@ -321,27 +447,34 @@ function renderSplit() {
 function updateSplitPreview() {
   const t = trip();
   const { mode, rows } = state.split;
-  const total = Math.round((Number($('#expenseForm').amount.value) || 0) * 100);
+  const total = amountCents($('#expenseForm').amount.value, t.currency);
+  const unit = unitCents(t.currency);
   const ids = activeRows();
-  let shares = {};
-  let foot = '';
+  const shares = {};
+  let foot;
   if (mode === 'equal') {
-    distribute(total, ids.map(() => 1)).forEach((c, i) => (shares[ids[i]] = c));
-    foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${ids.length ? money(Math.floor(total / ids.length), t.currency) + ' each' : ''}</span>`;
+    distributeUnits(total, ids.map(() => 1), unit).forEach((c, i) => (shares[ids[i]] = c));
+    // When it doesn't divide evenly, say so: "$3.33–$3.34 each", not a rounded-down "$3.33 each" (#20).
+    const vals = ids.map((id) => shares[id]);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const each = !ids.length ? '' : lo === hi ? `${money(lo, t.currency)} each` : `${money(lo, t.currency)}–${money(hi, t.currency)} each`;
+    foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${each}</span>`;
   } else if (mode === 'exact') {
     let sum = 0;
-    ids.forEach((id) => { const c = Math.round(Number(rows[id].value) * 100); shares[id] = c; sum += c; });
+    ids.forEach((id) => { const c = amountCents(rows[id].value, t.currency); shares[id] = c; sum += c; });
     const diff = total - sum;
     foot = `<span>Assigned ${money(sum, t.currency)} of ${money(total, t.currency)}</span>` +
       (diff === 0 ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${money(Math.abs(diff), t.currency)} ${diff > 0 ? 'left to assign' : 'too much'}</span>`);
   } else {
     const w = ids.map((id) => Number(rows[id].value));
-    distribute(total, w).forEach((c, i) => (shares[ids[i]] = c));
+    distributeUnits(total, w, unit).forEach((c, i) => (shares[ids[i]] = c));
     if (mode === 'percent') {
       const p = +w.reduce((a, b) => a + b, 0).toFixed(3);
-      foot = `<span>Total ${p}%</span>` + (Math.abs(p - 100) < 0.001 ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
+      // "5% over", not "-5% over" (#20).
+      foot = `<span>Total ${p}%</span>` + (percentTotalOk(p) ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+Math.abs(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
     } else {
-      foot = `<span>${w.reduce((a, b) => a + b, 0)} total shares</span><span></span>`;
+      // Rounded like the percent total: 0.1 + 0.2 shows as 0.3, not 0.30000000000000004 (#20).
+      foot = `<span>${+w.reduce((a, b) => a + b, 0).toFixed(3)} total shares</span><span></span>`;
     }
   }
   t.memberIds.forEach((id) => {
@@ -358,9 +491,17 @@ function openExpense(e) {
   $('#expenseDialogTitle').textContent = e ? 'Edit expense' : 'Add expense';
   f.paidBy.innerHTML = t.memberIds.map((id) => `<option value="${id}">${esc(personName(id))}</option>`).join('');
   f.description.value = e?.description || '';
-  f.amount.value = e ? (e.amountCents / 100).toFixed(2) : '';
-  f.date.value = e?.date || new Date().toISOString().slice(0, 10);
-  f.category.value = e?.category || 'Food';
+  // Whole units only for currencies like JPY (#6).
+  const digits = currencyDigits(t.currency);
+  f.amount.step = String(10 ** -digits);
+  f.amount.min = String(10 ** -digits);
+  f.amount.value = e ? amountText(e.amountCents, t.currency) : '';
+  f.date.value = e?.date || localToday(); // the user's date, not UTC's (#6)
+  // Categories come from shared.js, like the server's. An older expense may use one that's no
+  // longer in the list: show it as an extra option rather than an empty select (#21).
+  const cats = e?.category && !CATEGORIES.includes(e.category) ? [...CATEGORIES, e.category] : CATEGORIES;
+  f.category.innerHTML = cats.map((c) => `<option>${esc(c)}</option>`).join('');
+  f.category.value = e?.category || DEFAULT_CATEGORY;
   f.notes.value = e?.notes || '';
   f.paidBy.value = e?.paidBy || (t.memberIds.includes(state.me) ? state.me : t.memberIds[0]);
 
@@ -376,7 +517,7 @@ function openExpense(e) {
   f.description.focus();
 }
 
-$('#addExpenseBtn').onclick = () => openExpense();
+$('#addExpenseBtn').addEventListener('click', () => openExpense());
 $('#splitMode').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-mode]');
   if (!b) return;
@@ -388,12 +529,13 @@ $('#splitMode').addEventListener('click', (ev) => {
   const included = prev === 'equal'
     ? Object.keys(rows).filter((id) => rows[id].on)
     : Object.keys(rows).filter((id) => Number(rows[id].value) > 0);
-  const total = Number($('#expenseForm').amount.value) || 0;
-  const evenCents = distribute(Math.round(total * 100), included.map(() => 1));
+  const cur = trip().currency;
+  const totalCents = amountCents($('#expenseForm').amount.value, cur);
+  const evenCents = distributeUnits(totalCents, included.map(() => 1), unitCents(cur));
   for (const id of Object.keys(rows)) {
     const idx = included.indexOf(id);
     rows[id].on = idx >= 0;
-    if (next === 'exact') rows[id].value = idx >= 0 && total ? (evenCents[idx] / 100).toFixed(2) : '';
+    if (next === 'exact') rows[id].value = idx >= 0 && totalCents ? amountText(evenCents[idx], cur) : '';
     if (next === 'percent') rows[id].value = idx >= 0 ? String(+(100 / included.length).toFixed(4)) : '';
     if (next === 'shares') rows[id].value = idx >= 0 ? '1' : '';
   }
@@ -409,9 +551,11 @@ $('#splitRows').addEventListener('input', (ev) => {
 });
 $('#expenseForm').amount.addEventListener('input', updateSplitPreview);
 
-$('#expenseForm').addEventListener('submit', async (ev) => {
+$('#expenseForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
-  const f = ev.target;
+  return busy(ev.submitter, () => saveExpense(ev.target));
+});
+async function saveExpense(f) {
   const { mode, rows } = state.split;
   const body = {
     tripId: state.tripId,
@@ -432,8 +576,9 @@ $('#expenseForm').addEventListener('submit', async (ev) => {
     await loadTrip();
     render();
     toast(e ? 'Expense updated' : 'Expense added');
-  } catch (err) { $('#expenseError').textContent = err.message; }
-});
+    focusFirst(e && `[data-edit-exp="${e.id}"]`, '#addExpenseBtn');
+  } catch (err) { showError(err, $('#expenseError')); }
+}
 
 $('#expenseList').addEventListener('click', async (ev) => {
   const edit = ev.target.closest('[data-edit-exp]');
@@ -441,31 +586,72 @@ $('#expenseList').addEventListener('click', async (ev) => {
   if (edit) openExpense(state.expenses.find((x) => x.id === edit.dataset.editExp));
   if (del) {
     const e = state.expenses.find((x) => x.id === del.dataset.delExp);
-    if (!confirm(`Delete "${e.description}" (${money(e.amountCents)})?`)) return;
-    await api('DELETE', `/api/expenses/${e.id}`);
-    await loadTrip();
-    render();
-    toast('Expense deleted');
+    const what = isPayment(e) ? `the payment from ${personName(e.paidBy)} to ${personName(e.shares[0]?.personId)}` : `“${e.description}”`;
+    if (!(await confirmDialog(`${money(e.amountCents)}. This can't be undone.`, { title: `Delete ${what}?`, ok: 'Delete', danger: true }))) return;
+    await busy(del, async () => {
+      try {
+        await api('DELETE', `/api/expenses/${e.id}`);
+        await loadTrip();
+        render();
+        toast(isPayment(e) ? 'Payment deleted' : 'Expense deleted');
+        focusFirst('#addExpenseBtn');
+      } catch (err) { showError(err); }
+    });
   }
 });
 $('#search').addEventListener('input', renderExpenses);
+$('#expenseList').addEventListener('click', (ev) => {
+  if (!ev.target.closest('#clearSearchBtn')) return;
+  $('#search').value = '';
+  renderExpenses();
+  $('#search').focus();
+});
+
+// "Mark paid" on a settle-up line records the payment (#19).
+$('#transferList').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('[data-mark-paid]');
+  if (!btn) return;
+  const x = state.summary.transfers[Number(btn.dataset.markPaid)];
+  if (!(await confirmDialog(`Record that ${personName(x.from)} paid ${personName(x.to)} ${money(x.cents)}?`, { title: 'Mark as paid', ok: 'Record payment' }))) return;
+  await busy(btn, async () => {
+    try {
+      await api('POST', '/api/settlements', { tripId: state.tripId, from: x.from, to: x.to, amount: amountText(x.cents), date: localToday() });
+      await loadTrip();
+      render();
+      toast('Payment recorded');
+      focusFirst('[data-mark-paid]', '#addExpenseBtn');
+    } catch (e) { showError(e); }
+  });
+});
 
 // ---------- accounts: log in / sign up / log out ----------
-async function showAuth(tab) {
-  state.user = null; state.me = '';
+// Back to the login screen (logout, or the session ended). Close every dialog and forget
+// everything loaded, so nothing from this session can be seen or submitted by whoever logs in
+// next (#7).
+function showAuth(message = '') {
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+  Object.assign(state, {
+    user: null, me: '', people: [], trips: [], expenses: [], summary: null,
+    editing: { person: null, trip: null, expense: null },
+  });
+  render();
   $('#authScreen').hidden = false;
+  $('#loginError').textContent = message;
   $('#registerError').textContent = '';
-  switchAuthTab(tab || 'login');
+  switchAuthTab('login');
 }
 function hideAuth() { $('#authScreen').hidden = true; }
 function switchAuthTab(tab) {
   document.querySelectorAll('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   $('#loginForm').hidden = tab !== 'login';
   $('#registerForm').hidden = tab !== 'register';
-  (tab === 'login' ? $('#loginForm') : $('#registerForm')).querySelector('input:not([hidden])')?.focus();
+  (tab === 'login' ? $('#loginForm') : $('#registerForm')).querySelector('input')?.focus();
 }
-async function signedIn(user) {
+async function signedIn(user, maxPeople) {
+  // Whatever was on screen belonged to the previous session.
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   state.user = user; state.me = user.id;
+  if (maxPeople) state.maxPeople = maxPeople;
   hideAuth();
   $('#loginForm').reset(); $('#registerForm').reset();
   $('#loginError').textContent = ''; $('#registerError').textContent = '';
@@ -474,54 +660,80 @@ async function signedIn(user) {
 
 $('#authTabs').addEventListener('click', (ev) => { const b = ev.target.closest('[data-tab]'); if (b) switchAuthTab(b.dataset.tab); });
 
-$('#loginForm').addEventListener('submit', async (ev) => {
+$('#loginForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;
-  try {
-    const { user } = await api('POST', '/api/auth/login', { username: f.username.value, password: f.password.value });
-    await signedIn(user);
-    toast(`Welcome back, ${user.name}!`);
-  } catch (e) { $('#loginError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      const { user } = await api('POST', '/api/auth/login', { username: f.username.value, password: f.password.value });
+      await signedIn(user);
+      toast(`Welcome back, ${user.name}!`);
+    } catch (e) { $('#loginError').textContent = e.message; }
+  });
 });
 
-$('#registerForm').addEventListener('submit', async (ev) => {
+$('#registerForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;
   if (f.password.value !== f.confirm.value) { $('#registerError').textContent = "Passwords don't match"; return; }
-  try {
-    const { user } = await api('POST', '/api/auth/register', {
-      username: f.username.value, password: f.password.value, name: f.name.value, inviteCode: f.inviteCode.value,
-    });
-    await signedIn(user);
-    toast(`Welcome, ${user.name}!`);
-  } catch (e) { $('#registerError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      const { user } = await api('POST', '/api/auth/register', {
+        username: f.username.value, password: f.password.value, name: f.name.value, inviteCode: f.inviteCode.value,
+      });
+      await signedIn(user);
+      toast(`Welcome, ${user.name}!`);
+    } catch (e) { $('#registerError').textContent = e.message; }
+  });
 });
 
-$('#logoutBtn').onclick = async () => {
-  await api('POST', '/api/auth/logout');
-  state.people = []; state.trips = []; state.expenses = []; state.summary = null;
-  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
-  showAuth();
-};
+$('#logoutBtn').addEventListener('click', (ev) => busy(ev.currentTarget, async () => {
+  try {
+    await api('POST', '/api/auth/logout');
+    showAuth();
+  } catch (e) { showError(e); }
+}));
 
-$('#passwordBtn').onclick = () => { $('#passwordForm').reset(); $('#passwordError').textContent = ''; $('#passwordDialog').showModal(); };
-$('#passwordForm').addEventListener('submit', async (ev) => {
+$('#passwordBtn').addEventListener('click', () => { $('#passwordForm').reset(); $('#passwordError').textContent = ''; $('#passwordDialog').showModal(); });
+$('#passwordForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;
   if (f.next.value !== f.confirm.value) { $('#passwordError').textContent = "New passwords don't match"; return; }
-  try {
-    await api('POST', '/api/auth/password', { current: f.current.value, next: f.next.value });
-    $('#passwordDialog').close();
-    toast('Password updated');
-  } catch (e) { $('#passwordError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      await api('POST', '/api/auth/password', { current: f.current.value, next: f.next.value });
+      $('#passwordDialog').close();
+      toast('Password updated');
+    } catch (e) {
+      // Too many wrong guesses ends the session (#14).
+      if (e.status === 401) showAuth(e.message);
+      else showError(e, $('#passwordError'));
+    }
+  });
 });
+
+// ---------- keep shared data fresh ----------
+// Other members change things too. Reload when you come back to the tab, and every 45 s while
+// it's visible, but never while a dialog is open (it would pull data out from under a form) (#20).
+const REFRESH_MS = 45_000;
+let lastRefresh = 0;
+async function refresh() {
+  if (!state.me || document.hidden || document.querySelector('dialog[open]')) return;
+  if (Date.now() - lastRefresh < 5_000) return;
+  lastRefresh = Date.now();
+  try { await loadAll(); } catch (e) { if (!e.sessionEnded) console.warn('Refresh failed:', e.message); }
+}
+document.addEventListener('visibilitychange', refresh);
+window.addEventListener('focus', refresh);
+setInterval(refresh, REFRESH_MS);
 
 // ---------- start ----------
 (async () => {
   try {
-    const { user } = await api('GET', '/api/auth/me');
-    if (user) await signedIn(user); else await showAuth();
+    const { user, maxPeople } = await api('GET', '/api/auth/me');
+    if (maxPeople) state.maxPeople = maxPeople;
+    if (user) await signedIn(user, maxPeople); else showAuth();
   } catch (e) {
-    document.body.insertAdjacentHTML('afterbegin', `<p class="error" style="padding:1rem">Could not reach the server: ${esc(e.message)}</p>`);
+    document.body.insertAdjacentHTML('afterbegin', `<p class="error fatal-error">Could not reach the server: ${esc(e.message)}</p>`);
   }
 })();

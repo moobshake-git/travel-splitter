@@ -5,22 +5,51 @@ No dependencies — just Node.js.
 
 ## Run
 
+Needs Node.js 18 or newer.
+
 ```bash
 cd travel-splitter
-node server.js
+npm start            # or: node server.js
 ```
 
-Open http://localhost:3000. Data is saved to `data.json` next to `server.js`
-(delete that file to start fresh). Anyone on your Wi-Fi can use it at
-`http://<your-computer-ip>:3000`.
+Open http://localhost:3000. To use another port: `node server.js 8080` or `PORT=8080 npm start`.
 
-## Tests
+**Your data** lives in `data.json` next to `server.js`. It holds every account (password
+hashes included), trip and expense, so **back it up** (copy it while the server is stopped)
+and don't share it. Delete it to start fresh. If it's ever damaged, the server refuses to
+start rather than overwrite it.
 
-Uses Node's built-in test runner (Node 22+), still no dependencies:
+### Sharing with your group on the same Wi-Fi
+
+By default the server only accepts connections from this computer. To let others on your
+network use it, start it with `HOST=0.0.0.0`:
 
 ```bash
-npm test           # run the API tests
-npm run coverage   # with a line/branch coverage report for server.js
+HOST=0.0.0.0 npm start
+```
+
+They then open `http://<your-computer-ip>:3000`. **Plain HTTP sends passwords and session
+cookies unencrypted**, so anyone on the same network (e.g. café or hotel Wi-Fi) could read
+them. Prefer HTTPS: create a certificate (for example with
+[mkcert](https://github.com/FiloSottile/mkcert), or a self-signed one) and point the server
+at it:
+
+```bash
+HOST=0.0.0.0 TLS_CERT=cert.pem TLS_KEY=key.pem npm start
+```
+
+With HTTPS on, the session cookie is also marked `Secure`.
+
+## Development
+
+The app itself has no dependencies. Linting needs dev dependencies (ESLint), so run
+`npm install` once. Tests use Node's built-in runner (Node 22+).
+
+```bash
+npm test           # API + unit tests
+npm run lint       # ESLint
+npm run check      # both; this is what CI runs on every push and pull request
+npm run coverage   # tests with a coverage report
 ```
 
 Tests start the real server on a random port against a throwaway data file
@@ -31,12 +60,20 @@ Tests start the real server on a random port against a throwaway data file
 - **Create account**: enter your name, a username and a password (max 10 people).
   If a friend already added you, also enter the **invite code** they were shown. You then
   take over that spot, with its trips and expenses. Each code works once.
-- Passwords are stored hashed (scrypt), never in plain text. Sessions last 30 days.
-- 5 wrong passwords in a row locks that username for 1 minute.
-- **Forgot password?** Whoever runs the server can reset it:
+- Passwords are stored hashed (scrypt), never in plain text. Sessions last 30 days, and
+  only a hash of each session token is stored. Each person keeps at most 10 sessions.
+- 5 wrong passwords in a row locks that username for 1 minute; each further lockout is
+  twice as long (up to 1 hour). One network address that gets 30 logins wrong, across any
+  usernames, is locked out the same way.
+- **Change password** needs your current password, with the same lockout. 5 wrong guesses
+  also log that session out. Changing your password logs you out everywhere else.
+- **Forgot password?** Whoever runs the server can reset it. **Stop the server first**
+  (the command refuses to run while it's up, because the running server would overwrite
+  the change), then:
   ```bash
   node server.js reset-password <username> <new-password>
   ```
+  This also signs that user out everywhere. Start the server again afterwards.
 
 ## Who can do what
 - You only see trips you are on.
@@ -57,4 +94,7 @@ Tests start the real server on a random port against a throwaway data file
 - **Split modes**: evenly among selected people, exact amounts, percentages, or shares (weights).
   Rounding is handled to the cent so shares always add up to the total.
 - **Balances & Settle up**: who paid what, each person's share, and the fewest
-  payments needed to square everyone up.
+  payments needed to square everyone up (computed exactly, not approximated).
+- **Mark paid**: the payer or the person being paid can record a payment from the Settle up
+  list. It updates balances but doesn't count as spending, so the trip total stays the same.
+  Payments show in the expense list with 💸 and can be deleted by either person.

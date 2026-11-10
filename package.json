@@ -3,9 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "description": "Track shared travel expenses for up to 10 people and split costs automatically.",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
+    "lint": "eslint .",
     "test": "node --test 'test/*.test.js'",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js 'test/*.test.js'"
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include='lib/**' --test-coverage-include='bin/**' --test-coverage-include=public/shared.js 'test/*.test.js'",
+    "check": "npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0"
+  },
+  "overrides": {
+    "minimatch": "^11.0.5"
   }
 }
