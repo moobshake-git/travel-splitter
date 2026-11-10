@@ -31,6 +31,8 @@ async function api(method, url, body) {
 
 // ---------- formatting ----------
 const trip = () => state.trips.find((t) => t.id === state.tripId);
+// Recorded payments ("Ben paid Ana back") live alongside expenses but aren't spending (#19).
+const isPayment = (e) => e.kind === 'settlement';
 // Amount typed in a form → hundredths, or 0 while it isn't a valid amount yet (for previews).
 const amountCents = (v, currency = trip()?.currency) => parseAmount(v, currency).cents || 0;
 // Hundredths → the text to put in an amount input (no decimals for JPY etc.).
@@ -110,7 +112,7 @@ function renderTrip(t) {
   $('#deleteTripBtn').hidden = !!t.createdBy && t.createdBy !== state.me;
   $('#tripMembers').textContent = `${t.currency} · ${t.memberIds.map(personName).join(', ')}`;
   $('#statTotal').textContent = money(s.totalCents);
-  $('#statCount').textContent = state.expenses.length;
+  $('#statCount').textContent = state.expenses.filter((e) => !isPayment(e)).length;
 
   const mine = s.people.find((p) => p.personId === state.me);
   if (mine) {
@@ -126,8 +128,9 @@ function renderTrip(t) {
     const b = p.balanceCents;
     const cls = b > 0 ? 'pos' : b < 0 ? 'neg' : 'muted';
     const label = b > 0 ? `gets back ${money(b)}` : b < 0 ? `owes ${money(-b)}` : 'settled';
+    const moved = [p.sentCents && `paid back ${money(p.sentCents)}`, p.receivedCents && `got back ${money(p.receivedCents)}`].filter(Boolean).join(', ');
     return `<tr>
-      <td>${esc(personName(p.personId))}${p.personId === state.me ? ' <span class="tag">you</span>' : ''}</td>
+      <td>${esc(personName(p.personId))}${p.personId === state.me ? ' <span class="tag">you</span>' : ''}${moved ? `<div class="sub">${moved}</div>` : ''}</td>
       <td class="num">${money(p.paidCents)}</td>
       <td class="num">${money(p.owedCents)}</td>
       <td class="num ${cls}">${label}</td>
@@ -135,8 +138,10 @@ function renderTrip(t) {
   }).join('');
 
   $('#transferList').innerHTML = s.transfers.length
-    ? s.transfers.map((x) => `
-      <li><span><b>${esc(personName(x.from))}</b> pays <b>${esc(personName(x.to))}</b></span><span class="amt">${money(x.cents)}</span></li>`).join('')
+    ? s.transfers.map((x, i) => `
+      <li><span><b>${esc(personName(x.from))}</b> pays <b>${esc(personName(x.to))}</b></span>
+        <span class="amt">${money(x.cents)}</span>
+        ${x.from === state.me || x.to === state.me ? `<button class="btn small" data-mark-paid="${i}">Mark paid</button>` : ''}</li>`).join('')
     : `<li class="muted transfers-note">${state.expenses.length ? 'Everyone is settled up 🎉' : 'Add an expense to see who owes whom.'}</li>`;
 
   renderExpenses();
@@ -155,6 +160,20 @@ function renderExpenses() {
   $('#expenseList').innerHTML = list.map((e) => {
     const d = new Date(e.date + 'T00:00:00');
     const mon = d.toLocaleString(undefined, { month: 'short' });
+    if (isPayment(e)) {
+      const to = e.shares[0]?.personId;
+      return `<div class="expense payment">
+        <div class="date">${mon}<b>${d.getDate()}</b></div>
+        <div>
+          <div class="title">💸 ${esc(personName(e.paidBy))} paid ${esc(personName(to))}<span class="tag">payment</span></div>
+          <div class="meta">Settling up${e.createdBy ? ' · recorded by ' + esc(personName(e.createdBy)) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
+        </div>
+        <div class="amount">${money(e.amountCents)}</div>
+        <div class="row-actions">
+          ${e.canEdit ? `<button class="icon-btn" title="Delete" data-del-exp="${e.id}">🗑</button>` : ''}
+        </div>
+      </div>`;
+    }
     const who = e.shares.map((sh) => `${esc(personName(sh.personId))} ${money(sh.cents)}`).join(' · ');
     return `<div class="expense">
       <div class="date">${mon}<b>${d.getDate()}</b></div>
@@ -464,7 +483,8 @@ $('#expenseList').addEventListener('click', async (ev) => {
   if (edit) openExpense(state.expenses.find((x) => x.id === edit.dataset.editExp));
   if (del) {
     const e = state.expenses.find((x) => x.id === del.dataset.delExp);
-    if (!confirm(`Delete "${e.description}" (${money(e.amountCents)})?`)) return;
+    const what = isPayment(e) ? `the payment from ${personName(e.paidBy)} to ${personName(e.shares[0]?.personId)}` : `"${e.description}"`;
+    if (!confirm(`Delete ${what} (${money(e.amountCents)})?`)) return;
     await api('DELETE', `/api/expenses/${e.id}`);
     await loadTrip();
     render();
@@ -472,6 +492,20 @@ $('#expenseList').addEventListener('click', async (ev) => {
   }
 });
 $('#search').addEventListener('input', renderExpenses);
+
+// "Mark paid" on a settle-up line records the payment (#19).
+$('#transferList').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('[data-mark-paid]');
+  if (!btn) return;
+  const x = state.summary.transfers[Number(btn.dataset.markPaid)];
+  if (!confirm(`Record that ${personName(x.from)} paid ${personName(x.to)} ${money(x.cents)}?`)) return;
+  try {
+    await api('POST', '/api/settlements', { tripId: state.tripId, from: x.from, to: x.to, amount: amountText(x.cents), date: localToday() });
+    await loadTrip();
+    render();
+    toast('Payment recorded');
+  } catch (e) { toast(e.message); }
+});
 
 // ---------- accounts: log in / sign up / log out ----------
 function showAuth(tab) {

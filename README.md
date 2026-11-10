@@ -94,4 +94,7 @@ Tests start the real server on a random port against a throwaway data file
 - **Split modes**: evenly among selected people, exact amounts, percentages, or shares (weights).
   Rounding is handled to the cent so shares always add up to the total.
 - **Balances & Settle up**: who paid what, each person's share, and the fewest
-  payments needed to square everyone up.
+  payments needed to square everyone up (computed exactly, not approximated).
+- **Mark paid**: the payer or the person being paid can record a payment from the Settle up
+  list. It updates balances but doesn't count as spending, so the trip total stays the same.
+  Payments show in the expense list with 💸 and can be deleted by either person.
