@@ -115,7 +115,7 @@ function renderTrip(t) {
     $('#statMine').innerHTML = `<span class="${b > 0 ? 'pos' : b < 0 ? 'neg' : ''}">${money(Math.abs(b))}</span>`;
   } else {
     $('#statMineLabel').textContent = 'Your balance';
-    $('#statMine').innerHTML = `<span class="muted" style="font-size:.9rem;font-weight:400">Not on this trip</span>`;
+    $('#statMine').innerHTML = `<span class="muted stat-note">Not on this trip</span>`;
   }
 
   $('#balanceBody').innerHTML = s.people.map((p) => {
@@ -133,7 +133,7 @@ function renderTrip(t) {
   $('#transferList').innerHTML = s.transfers.length
     ? s.transfers.map((x) => `
       <li><span><b>${esc(personName(x.from))}</b> pays <b>${esc(personName(x.to))}</b></span><span class="amt">${money(x.cents)}</span></li>`).join('')
-    : `<li class="muted" style="background:none;padding:0">${state.expenses.length ? 'Everyone is settled up 🎉' : 'Add an expense to see who owes whom.'}</li>`;
+    : `<li class="muted transfers-note">${state.expenses.length ? 'Everyone is settled up 🎉' : 'Add an expense to see who owes whom.'}</li>`;
 
   renderExpenses();
 }
@@ -516,6 +516,6 @@ $('#passwordForm').addEventListener('submit', async (ev) => {
     if (maxPeople) state.maxPeople = maxPeople;
     if (user) await signedIn(user, maxPeople); else showAuth();
   } catch (e) {
-    document.body.insertAdjacentHTML('afterbegin', `<p class="error" style="padding:1rem">Could not reach the server: ${esc(e.message)}</p>`);
+    document.body.insertAdjacentHTML('afterbegin', `<p class="error fatal-error">Could not reach the server: ${esc(e.message)}</p>`);
   }
 })();

@@ -25,6 +25,15 @@ if (isMain) {
   }
   const arg = process.argv[2];
   const PORT = /^\d+$/.test(arg || '') ? Number(arg) : Number(process.env.PORT) || 3000; // 0 = any free port
-  server.listen(PORT, () => console.log(`Travel Splitter running at http://localhost:${server.address().port}`));
+  const { HOST, HTTPS } = require('./lib/config');
+  server.listen(PORT, HOST, () => {
+    const scheme = HTTPS ? 'https' : 'http';
+    const port = server.address().port;
+    console.log(`Travel Splitter running at ${scheme}://localhost:${port}`);
+    if (HOST !== '127.0.0.1' && HOST !== 'localhost' && HOST !== '::1') {
+      console.log(`Listening on ${HOST}: others on your network can use ${scheme}://<this-computer's-ip>:${port}`);
+      if (!HTTPS) console.warn('Warning: plain HTTP. Passwords and session cookies cross the network unencrypted. See README (HTTPS).');
+    }
+  });
 }
 module.exports = { server };

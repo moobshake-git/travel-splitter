@@ -5,14 +5,40 @@ No dependencies — just Node.js.
 
 ## Run
 
+Needs Node.js 18 or newer.
+
 ```bash
 cd travel-splitter
-node server.js
+npm start            # or: node server.js
 ```
 
-Open http://localhost:3000. Data is saved to `data.json` next to `server.js`
-(delete that file to start fresh). Anyone on your Wi-Fi can use it at
-`http://<your-computer-ip>:3000`.
+Open http://localhost:3000. To use another port: `node server.js 8080` or `PORT=8080 npm start`.
+
+**Your data** lives in `data.json` next to `server.js`. It holds every account (password
+hashes included), trip and expense, so **back it up** (copy it while the server is stopped)
+and don't share it. Delete it to start fresh. If it's ever damaged, the server refuses to
+start rather than overwrite it.
+
+### Sharing with your group on the same Wi-Fi
+
+By default the server only accepts connections from this computer. To let others on your
+network use it, start it with `HOST=0.0.0.0`:
+
+```bash
+HOST=0.0.0.0 npm start
+```
+
+They then open `http://<your-computer-ip>:3000`. **Plain HTTP sends passwords and session
+cookies unencrypted**, so anyone on the same network (e.g. café or hotel Wi-Fi) could read
+them. Prefer HTTPS: create a certificate (for example with
+[mkcert](https://github.com/FiloSottile/mkcert), or a self-signed one) and point the server
+at it:
+
+```bash
+HOST=0.0.0.0 TLS_CERT=cert.pem TLS_KEY=key.pem npm start
+```
+
+With HTTPS on, the session cookie is also marked `Secure`.
 
 ## Development
 
