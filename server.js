@@ -11,13 +11,25 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_PEOPLE = 10;
 const SESSION_DAYS = 30;
 const COOKIE = 'ts_session';
+const CURRENCIES = new Set(Intl.supportedValuesOf('currency'));
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I look-alikes
 
 // ---------- storage ----------
 function load() {
   let d;
   try { d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { d = {}; }
-  return { people: [], trips: [], expenses: [], sessions: {}, ...d };
+  const data = { people: [], trips: [], expenses: [], sessions: {}, ...d };
+  // Older data: invited people had no invite code — give them one so they can still join.
+  for (const p of data.people) if (!p.account && !p.inviteCode) p.inviteCode = newInviteCode();
+  return data;
 }
+// 8 characters from a 32-letter alphabet = 40 bits of randomness.
+function newInviteCode() {
+  let s = '';
+  for (let i = 0; i < 8; i++) s += INVITE_ALPHABET[crypto.randomInt(INVITE_ALPHABET.length)];
+  return s;
+}
+const normalizeCode = (v) => (typeof v === 'string' ? v.toUpperCase().replace(/[^A-Z0-9]/g, '') : '');
 let db = load();
 function save() {
   const tmp = DATA_FILE + '.tmp';
@@ -87,8 +99,27 @@ function toCents(v, field = 'amount') {
   if (!Number.isFinite(n)) bad(`${field} must be a number`);
   return Math.round(n * 100);
 }
-// What the browser is allowed to see about a person (never password data).
-const publicPerson = (p) => ({ id: p.id, name: p.name, hasAccount: !!p.account, username: p.account?.username || null });
+const sharesTrip = (aId, bId) => db.trips.some((t) => t.memberIds.includes(aId) && t.memberIds.includes(bId));
+// Who may rename/remove an invited person or see their invite code (#2): whoever added them,
+// or someone on a trip with them. Legacy invitees with no recorded adder who are on no trip
+// are open to anyone, otherwise they could never be cleaned up.
+function canManageInvitee(p, user) {
+  if (p.account) return false;
+  if (p.addedBy === user.id || sharesTrip(p.id, user.id)) return true;
+  return !p.addedBy && !db.trips.some((t) => t.memberIds.includes(p.id));
+}
+// What the browser is allowed to see about a person (never password data, and only your own username).
+function publicPerson(p, viewer) {
+  const canManage = !!viewer && canManageInvitee(p, viewer);
+  return {
+    id: p.id,
+    name: p.name,
+    hasAccount: !!p.account,
+    username: viewer && p.id === viewer.id ? p.account?.username || null : null,
+    canManage,
+    inviteCode: canManage ? p.inviteCode || null : null,
+  };
+}
 
 function memberTrip(tripId, user) {
   const trip = db.trips.find((t) => t.id === tripId) || notFound('Trip');
@@ -242,20 +273,30 @@ function startSession(ctx, person) {
   pruneSessions();
   save();
   ctx.res.setHeader('Set-Cookie', sessionCookie(token, SESSION_DAYS * 86400));
-  return { user: publicPerson(person) };
+  return { user: publicPerson(person, person) };
 }
 
-route('GET', '/api/auth/me', (_, __, { user }) => ({ user: user ? publicPerson(user) : null }), { public: true });
+route('GET', '/api/auth/me', (_, __, { user }) => ({ user: user ? publicPerson(user, user) : null }), { public: true });
 
 route('POST', '/api/auth/register', (b, _, ctx) => {
   const username = cleanUsername(b.username);
   const password = cleanPassword(b.password);
   const name = cleanName(b.name, 'Your name');
+  const code = normalizeCode(b.inviteCode);
   if (db.people.some((p) => p.account?.username === username)) bad('That username is taken');
-  // If a friend already added you by this exact name (and nobody has claimed it), you take over that spot.
-  let person = db.people.find((p) => p.name.toLowerCase() === name.toLowerCase());
-  if (person?.account) bad('Someone already has an account with that name — try adding your last initial');
-  if (!person) {
+  const nameTaken = (exceptId) => db.people.some((p) => p.id !== exceptId && p.name.toLowerCase() === name.toLowerCase());
+  let person;
+  if (code) {
+    // Claim the spot a friend created for you — only with the invite code they were shown (#2).
+    const buf = Buffer.from(code);
+    person = db.people.find((p) => !p.account && p.inviteCode && p.inviteCode.length === code.length
+      && crypto.timingSafeEqual(Buffer.from(p.inviteCode), buf));
+    if (!person) bad('That invite code isn\'t valid. Check it with the friend who added you — each code works once.');
+    if (nameTaken(person.id)) bad('Someone else in the group already has that name');
+    person.name = name;
+    delete person.inviteCode;
+  } else {
+    if (nameTaken()) bad('That name is already in the group. If a friend added you, enter the invite code they gave you.');
     if (db.people.length >= MAX_PEOPLE) bad(`The group is full (${MAX_PEOPLE} people). Ask someone to remove an unused name.`);
     person = { id: newId(), name };
     db.people.push(person);
@@ -292,26 +333,28 @@ route('POST', '/api/auth/password', (b, _, { user }) => {
 });
 
 // --- People ---
-route('GET', '/api/people', () => db.people.map(publicPerson));
-route('POST', '/api/people', (b) => {
-  // Lets you add a travel buddy who hasn't signed up yet; they claim the name when they register.
+route('GET', '/api/people', (_, __, { user }) => db.people.map((p) => publicPerson(p, user)));
+route('POST', '/api/people', (b, _, { user }) => {
+  // Add a travel buddy who hasn't signed up yet. They join with the invite code shown to you.
   if (db.people.length >= MAX_PEOPLE) bad(`This app supports up to ${MAX_PEOPLE} people`);
   const name = cleanName(b.name);
   if (db.people.some((p) => p.name.toLowerCase() === name.toLowerCase())) bad('Someone already has that name');
-  const p = { id: newId(), name };
-  db.people.push(p); save(); return publicPerson(p);
+  const p = { id: newId(), name, addedBy: user.id, inviteCode: newInviteCode() };
+  db.people.push(p); save(); return publicPerson(p, user);
 });
 route('PUT', '/api/people/:id', (b, { id }, { user }) => {
   const p = db.people.find((x) => x.id === id) || notFound('Person');
   if (p.account && p.id !== user.id) forbidden('Only they can rename themselves');
+  if (!p.account && !canManageInvitee(p, user)) forbidden('You can only rename people you added or who are on a trip with you');
   const name = cleanName(b.name);
   if (db.people.some((x) => x.id !== id && x.name.toLowerCase() === name.toLowerCase())) bad('Someone already has that name');
-  p.name = name; save(); return publicPerson(p);
+  p.name = name; save(); return publicPerson(p, user);
 });
-route('DELETE', '/api/people/:id', (_, { id }) => {
+route('DELETE', '/api/people/:id', (_, { id }, { user }) => {
   const idx = db.people.findIndex((x) => x.id === id);
   if (idx < 0) notFound('Person');
   if (db.people[idx].account) forbidden('People with an account can\'t be removed from the app');
+  if (!canManageInvitee(db.people[idx], user)) forbidden('You can only remove people you added or who are on a trip with you');
   const used = db.expenses.some((e) => e.paidBy === id || e.shares.some((s) => s.personId === id));
   if (used) throw new HttpError(409, 'This person is part of existing expenses. Edit or delete those first.');
   db.people.splice(idx, 1);
@@ -322,7 +365,9 @@ route('DELETE', '/api/people/:id', (_, { id }) => {
 // --- Trips (you only see trips you're on) ---
 function validateTrip(b, existingId) {
   const name = cleanName(b.name, 'Trip name');
-  const currency = typeof b.currency === 'string' && b.currency.trim() ? b.currency.trim().slice(0, 8) : 'USD';
+  // Strict ISO 4217 code: this value is shown all over the UI, so never accept free text (#1).
+  const currency = typeof b.currency === 'string' && b.currency.trim() ? b.currency.trim().toUpperCase() : 'USD';
+  if (!/^[A-Z]{3}$/.test(currency) || !CURRENCIES.has(currency)) bad('Currency must be a 3-letter code such as USD, EUR, SGD or JPY');
   const memberIds = Array.isArray(b.memberIds) ? [...new Set(b.memberIds)] : [];
   if (memberIds.length === 0) bad('Add at least one person to the trip');
   for (const m of memberIds) if (!db.people.some((p) => p.id === m)) bad('Unknown person in trip');
@@ -344,6 +389,10 @@ route('PUT', '/api/trips/:id', (b, { id }, { user }) => {
   const t = memberTrip(id, user);
   const data = validateTrip(b, id);
   if (!data.memberIds.includes(user.id)) bad('You can\'t remove yourself from a trip');
+  // The creator is the only one who can delete the trip, so they must always stay on it (#3).
+  if (t.createdBy && !data.memberIds.includes(t.createdBy)) {
+    bad(`${db.people.find((p) => p.id === t.createdBy)?.name || 'The trip creator'} created this trip and can't be removed from it`);
+  }
   Object.assign(t, data); save(); return t;
 });
 route('DELETE', '/api/trips/:id', (_, { id }, { user }) => {

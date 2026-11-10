@@ -25,6 +25,7 @@
 
       <form id="registerForm" class="auth-form" hidden>
         <label>Your name<input name="name" required maxlength="80" autocomplete="name" placeholder="As your friends know you"></label>
+        <label>Invite code <span class="muted">(if a friend added you)</span><input name="inviteCode" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. K7Q2-M9XD"></label>
         <label>Choose a username<input name="username" required autocomplete="username" autocapitalize="none" placeholder="e.g. alex"></label>
         <label>Password<input name="password" type="password" required minlength="6" autocomplete="new-password"></label>
         <label>Confirm password<input name="confirm" type="password" required minlength="6" autocomplete="new-password"></label>
@@ -65,7 +66,7 @@
     <main id="main">
       <div id="emptyState" class="empty">
         <h1>Welcome 👋</h1>
-        <p>1. Add your travel buddies on the left (up to 10) — when they sign up with the same name, they take over that spot.<br>2. Create a trip and pick who's on it.<br>3. Log expenses — split evenly or assign amounts. Balances update automatically.</p>
+        <p>1. Add your travel buddies on the left (up to 10) — share the invite code with them so they can join.<br>2. Create a trip and pick who's on it.<br>3. Log expenses — split evenly or assign amounts. Balances update automatically.</p>
       </div>
 
       <div id="tripView" hidden>
@@ -130,7 +131,7 @@
     <form method="dialog" id="tripForm">
       <h2 id="tripDialogTitle">New trip</h2>
       <label>Trip name<input name="name" required maxlength="80" autocomplete="off" placeholder="e.g. Tokyo 2026"></label>
-      <label>Currency<input name="currency" maxlength="8" value="USD"></label>
+      <label>Currency<input name="currency" maxlength="3" pattern="[A-Za-z]{3}" title="3-letter code, e.g. USD, EUR, SGD, JPY" value="USD" autocapitalize="characters"></label>
       <fieldset>
         <legend>Who's on this trip?</legend>
         <div id="tripMembersPick" class="checks"></div>
@@ -180,6 +181,19 @@
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button class="btn primary" value="save">Save expense</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Invite code dialog -->
+  <dialog id="inviteDialog">
+    <form method="dialog">
+      <h2>Invite <span id="inviteName"></span></h2>
+      <p class="muted" style="margin:0">Send them this code. They enter it on <b>Create account</b> to join with their spot, trips and expenses. Each code works once.</p>
+      <div class="invite-code" id="inviteCode"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="copyInviteBtn">Copy code</button>
+        <button class="btn primary" value="close">Done</button>
       </div>
     </form>
   </dialog>
