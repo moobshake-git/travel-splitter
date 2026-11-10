@@ -57,8 +57,13 @@ function pruneSessions() {
   const now = Date.now();
   for (const [t, s] of Object.entries(db.sessions)) if (s.expires < now) delete db.sessions[t];
 }
+// decodeURIComponent throws on stray '%' — never let one bad value take down a request.
+function safeDecode(v) {
+  try { return decodeURIComponent(v); } catch { return v; }
+}
 function parseCookies(header = '') {
-  return Object.fromEntries(header.split(';').map((c) => c.trim().split('=')).filter(([k]) => k).map(([k, ...v]) => [k, decodeURIComponent(v.join('='))]));
+  // Cookies on localhost are shared by every port, so other apps' cookies end up here too.
+  return Object.fromEntries(header.split(';').map((c) => c.trim().split('=')).filter(([k]) => k).map(([k, ...v]) => [k, safeDecode(v.join('='))]));
 }
 const sessionCookie = (token, maxAge) =>
   `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
@@ -463,7 +468,7 @@ const server = http.createServer((req, res) => {
           const m = r.method === req.method && url.pathname.match(r.re);
           if (m) {
             if (!r.public && !user) throw new HttpError(401, 'Please log in');
-            const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+            const params = Object.fromEntries(r.keys.map((k, i) => [k, safeDecode(m[i + 1])]));
             return send(res, req.method === 'POST' ? 201 : 200, r.handler(body, params, { user, req, res }));
           }
         }
