@@ -1,4 +1,5 @@
-// Travel Splitter front end (vanilla JS).
+// Travel Splitter front end (vanilla JS). Split math comes from shared.js (window.Shared).
+const { distribute, toCents } = window.Shared;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -8,6 +9,7 @@ const state = {
   tripId: localStorage.getItem('tripId') || null,
   me: '',        // logged-in person's id
   user: null,    // logged-in person
+  maxPeople: 10, // group size limit, from /api/auth/me
   expenses: [],
   summary: null,
   editing: { person: null, trip: null, expense: null },
@@ -69,8 +71,9 @@ function render() {
   $('#meName').textContent = state.people.find((p) => p.id === state.me)?.name || state.user?.name || '';
 
   // People
-  $('#peopleCount').textContent = `(${state.people.length}/10)`;
-  $('#newPersonBtn').disabled = state.people.length >= 10;
+  $('#peopleCount').textContent = `(${state.people.length}/${state.maxPeople})`;
+  $('#newPersonBtn').disabled = state.people.length >= state.maxPeople;
+  $('#maxPeopleNote').textContent = state.maxPeople;
   $('#peopleList').innerHTML = state.people.length
     ? state.people.map((p) => `
       <li>
@@ -153,7 +156,7 @@ function renderExpenses() {
       <div class="date">${mon}<b>${d.getDate()}</b></div>
       <div>
         <div class="title">${esc(e.description)}<span class="tag">${esc(e.category)}</span></div>
-        <div class="meta">${esc(personName(e.paidBy))} paid · ${MODE_LABEL[e.splitMode]} among ${e.shares.length}${e.createdBy && e.createdBy !== e.paidBy ? ' · added by ' + esc(personName(e.createdBy)) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
+        <div class="meta">${esc(personName(e.paidBy))} paid · ${MODE_LABEL[e.splitMode]} among ${e.shares.length}${e.createdBy && e.createdBy !== e.paidBy ? ' · added by ' + esc(personName(e.createdBy)) : ''}${e.updatedBy && e.updatedBy !== e.createdBy ? ' · edited by ' + esc(personName(e.updatedBy)) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
         <div class="split-detail">${who}</div>
       </div>
       <div class="amount">${money(e.amountCents)}</div>
@@ -277,17 +280,6 @@ const HINTS = {
   shares: 'Give weights, e.g. 2 for someone who had double. 0 = not included.',
 };
 
-// Mirror of the server's rounding so the preview matches what gets saved.
-function distribute(total, weights) {
-  const sum = weights.reduce((a, b) => a + b, 0);
-  if (sum <= 0) return weights.map(() => 0);
-  const raw = weights.map((w) => (total * w) / sum);
-  const fl = raw.map(Math.floor);
-  let left = total - fl.reduce((a, b) => a + b, 0);
-  raw.map((r, i) => [r - fl[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { fl[i]++; left--; } });
-  return fl;
-}
-
 function activeRows() {
   const t = trip();
   const { mode, rows } = state.split;
@@ -321,7 +313,7 @@ function renderSplit() {
 function updateSplitPreview() {
   const t = trip();
   const { mode, rows } = state.split;
-  const total = Math.round((Number($('#expenseForm').amount.value) || 0) * 100);
+  const total = toCents($('#expenseForm').amount.value) || 0;
   const ids = activeRows();
   let shares = {};
   let foot = '';
@@ -330,7 +322,7 @@ function updateSplitPreview() {
     foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${ids.length ? money(Math.floor(total / ids.length), t.currency) + ' each' : ''}</span>`;
   } else if (mode === 'exact') {
     let sum = 0;
-    ids.forEach((id) => { const c = Math.round(Number(rows[id].value) * 100); shares[id] = c; sum += c; });
+    ids.forEach((id) => { const c = toCents(rows[id].value) || 0; shares[id] = c; sum += c; });
     const diff = total - sum;
     foot = `<span>Assigned ${money(sum, t.currency)} of ${money(total, t.currency)}</span>` +
       (diff === 0 ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${money(Math.abs(diff), t.currency)} ${diff > 0 ? 'left to assign' : 'too much'}</span>`);
@@ -388,12 +380,12 @@ $('#splitMode').addEventListener('click', (ev) => {
   const included = prev === 'equal'
     ? Object.keys(rows).filter((id) => rows[id].on)
     : Object.keys(rows).filter((id) => Number(rows[id].value) > 0);
-  const total = Number($('#expenseForm').amount.value) || 0;
-  const evenCents = distribute(Math.round(total * 100), included.map(() => 1));
+  const totalCents = toCents($('#expenseForm').amount.value) || 0;
+  const evenCents = distribute(totalCents, included.map(() => 1));
   for (const id of Object.keys(rows)) {
     const idx = included.indexOf(id);
     rows[id].on = idx >= 0;
-    if (next === 'exact') rows[id].value = idx >= 0 && total ? (evenCents[idx] / 100).toFixed(2) : '';
+    if (next === 'exact') rows[id].value = idx >= 0 && totalCents ? (evenCents[idx] / 100).toFixed(2) : '';
     if (next === 'percent') rows[id].value = idx >= 0 ? String(+(100 / included.length).toFixed(4)) : '';
     if (next === 'shares') rows[id].value = idx >= 0 ? '1' : '';
   }
@@ -451,7 +443,7 @@ $('#expenseList').addEventListener('click', async (ev) => {
 $('#search').addEventListener('input', renderExpenses);
 
 // ---------- accounts: log in / sign up / log out ----------
-async function showAuth(tab) {
+function showAuth(tab) {
   state.user = null; state.me = '';
   $('#authScreen').hidden = false;
   $('#registerError').textContent = '';
@@ -464,8 +456,9 @@ function switchAuthTab(tab) {
   $('#registerForm').hidden = tab !== 'register';
   (tab === 'login' ? $('#loginForm') : $('#registerForm')).querySelector('input:not([hidden])')?.focus();
 }
-async function signedIn(user) {
+async function signedIn(user, maxPeople) {
   state.user = user; state.me = user.id;
+  if (maxPeople) state.maxPeople = maxPeople;
   hideAuth();
   $('#loginForm').reset(); $('#registerForm').reset();
   $('#loginError').textContent = ''; $('#registerError').textContent = '';
@@ -519,8 +512,9 @@ $('#passwordForm').addEventListener('submit', async (ev) => {
 // ---------- start ----------
 (async () => {
   try {
-    const { user } = await api('GET', '/api/auth/me');
-    if (user) await signedIn(user); else await showAuth();
+    const { user, maxPeople } = await api('GET', '/api/auth/me');
+    if (maxPeople) state.maxPeople = maxPeople;
+    if (user) await signedIn(user, maxPeople); else showAuth();
   } catch (e) {
     document.body.insertAdjacentHTML('afterbegin', `<p class="error" style="padding:1rem">Could not reach the server: ${esc(e.message)}</p>`);
   }

@@ -45,7 +45,7 @@
     </div>
   </header>
 
-  <div class="layout" id="appShell">
+  <div class="layout">
     <aside class="sidebar">
       <section>
         <div class="section-head">
@@ -63,10 +63,10 @@
       </section>
     </aside>
 
-    <main id="main">
+    <main>
       <div id="emptyState" class="empty">
         <h1>Welcome 👋</h1>
-        <p>1. Add your travel buddies on the left (up to 10) — share the invite code with them so they can join.<br>2. Create a trip and pick who's on it.<br>3. Log expenses — split evenly or assign amounts. Balances update automatically.</p>
+        <p>1. Add your travel buddies on the left (up to <span id="maxPeopleNote">10</span>) — share the invite code with them so they can join.<br>2. Create a trip and pick who's on it.<br>3. Log expenses — split evenly or assign amounts. Balances update automatically.</p>
       </div>
 
       <div id="tripView" hidden>
@@ -214,6 +214,7 @@
   </dialog>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="shared.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -6,6 +6,6 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test 'test/*.test.js'",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js 'test/*.test.js'"
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include='lib/**' --test-coverage-include='bin/**' --test-coverage-include=public/shared.js 'test/*.test.js'"
   }
 }

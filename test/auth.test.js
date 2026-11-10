@@ -21,7 +21,7 @@ test('register creates an account, sets a session cookie, and /me returns the us
 test('/me without a session returns null', async () => {
   const r = await request('GET', '/api/auth/me');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { user: null });
+  assert.deepEqual(r.body, { user: null, maxPeople: 10 });
 });
 
 test('register validates username, password and name', async () => {
