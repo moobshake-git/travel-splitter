@@ -55,6 +55,7 @@ h2 { font-size: 1rem; margin: 0 0 .75rem; }
 .auth-form { display: flex; flex-direction: column; gap: .75rem; }
 .auth-form .btn { margin-top: .25rem; padding: .6rem; }
 [hidden] { display: none !important; }
+.invite-code { font: 700 1.8rem/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .12em; text-align: center; padding: .8rem; background: var(--chip); border-radius: 10px; user-select: all; }
 
 .layout { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 56px); }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 1rem; display: flex; flex-direction: column; gap: 1.5rem; }

@@ -35,7 +35,9 @@ function money(cents, currency = trip()?.currency || 'USD') {
   try {
     return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v);
   } catch {
-    return `${currency} ${v.toFixed(2)}`;
+    // Invalid code (e.g. old data): keep letters only so this can never inject HTML (#1).
+    const code = String(currency).replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || '¤';
+    return `${code} ${v.toFixed(2)}`;
   }
 }
 function toast(msg) {
@@ -74,8 +76,9 @@ function render() {
       <li>
         <span>${esc(p.name)}${p.id === state.me ? ' <span class="tag">you</span>' : p.hasAccount ? '' : ' <span class="tag" title="Hasn\'t created an account yet">invited</span>'}</span>
         <span class="row-actions">
-          ${p.id === state.me || !p.hasAccount ? `<button class="icon-btn" title="Rename" data-edit-person="${p.id}">✎</button>` : ''}
-          ${!p.hasAccount ? `<button class="icon-btn" title="Remove" data-del-person="${p.id}">🗑</button>` : ''}
+          ${p.inviteCode ? `<button class="icon-btn" title="Show invite code" data-invite-person="${p.id}">🔗</button>` : ''}
+          ${p.id === state.me || p.canManage ? `<button class="icon-btn" title="Rename" data-edit-person="${p.id}">✎</button>` : ''}
+          ${p.canManage ? `<button class="icon-btn" title="Remove" data-del-person="${p.id}">🗑</button>` : ''}
         </span>
       </li>`).join('')
     : `<li class="empty-note">No one yet — add your travel group.</li>`;
@@ -179,16 +182,28 @@ $('#personForm').addEventListener('submit', async (ev) => {
   const name = ev.target.name.value;
   try {
     const p = state.editing.person;
-    if (p) await api('PUT', `/api/people/${p.id}`, { name });
-    else await api('POST', '/api/people', { name });
+    const saved = p ? await api('PUT', `/api/people/${p.id}`, { name }) : await api('POST', '/api/people', { name });
     $('#personDialog').close();
     await loadAll();
-    toast(p ? 'Renamed' : 'Person added');
+    if (p) toast('Renamed');
+    else showInvite(saved);
   } catch (e) { $('#personError').textContent = e.message; }
 });
+const formatCode = (c) => (c ? `${c.slice(0, 4)}-${c.slice(4)}` : '');
+function showInvite(p) {
+  $('#inviteName').textContent = p.name;
+  $('#inviteCode').textContent = formatCode(p.inviteCode);
+  $('#inviteDialog').showModal();
+}
+$('#copyInviteBtn').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#inviteCode').textContent); toast('Invite code copied'); }
+  catch { toast('Copy failed — select the code and copy it manually'); }
+};
 $('#peopleList').addEventListener('click', async (ev) => {
   const edit = ev.target.closest('[data-edit-person]');
   const del = ev.target.closest('[data-del-person]');
+  const invite = ev.target.closest('[data-invite-person]');
+  if (invite) showInvite(state.people.find((p) => p.id === invite.dataset.invitePerson));
   if (edit) openPerson(state.people.find((p) => p.id === edit.dataset.editPerson));
   if (del) {
     const p = state.people.find((x) => x.id === del.dataset.delPerson);
@@ -207,9 +222,15 @@ function openTrip(t) {
   f.name.value = t?.name || '';
   f.currency.value = t?.currency || 'USD';
   const members = new Set(t ? t.memberIds : state.people.map((p) => p.id));
-  $('#tripMembersPick').innerHTML = state.people.map((p) => p.id === state.me
-    ? `<label title="You're always on trips you create"><input type="checkbox" value="${p.id}" checked disabled> ${esc(p.name)} (you)</label>`
-    : `<label><input type="checkbox" value="${p.id}" ${members.has(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('');
+  const creator = t ? t.createdBy : state.me;
+  // You can't remove yourself, and nobody can remove the trip's creator (#3).
+  $('#tripMembersPick').innerHTML = state.people.map((p) => {
+    const locked = p.id === state.me || p.id === creator;
+    const note = [p.id === state.me && 'you', p.id === creator && 'creator'].filter(Boolean).join(', ');
+    return locked
+      ? `<label title="Can't be removed from this trip"><input type="checkbox" value="${p.id}" checked disabled> ${esc(p.name)} (${note})</label>`
+      : `<label><input type="checkbox" value="${p.id}" ${members.has(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`;
+  }).join('');
   $('#tripError').textContent = '';
   $('#tripDialog').showModal();
 }
@@ -287,7 +308,7 @@ function renderSplit() {
     const r = rows[id];
     const control = mode === 'equal'
       ? `<span></span>`
-      : `<input type="number" step="${mode === 'shares' ? '0.5' : '0.01'}" min="0" placeholder="0 ${unit}" data-split-val="${id}" value="${esc(r.value)}">`;
+      : `<input type="number" step="any" min="0" placeholder="0 ${unit}" data-split-val="${id}" value="${esc(r.value)}">`;
     return `<div class="split-row">
       <label class="who">${mode === 'equal' ? `<input type="checkbox" data-split-on="${id}" ${r.on ? 'checked' : ''}>` : ''}${esc(personName(id))}</label>
       ${control}
@@ -469,7 +490,7 @@ $('#registerForm').addEventListener('submit', async (ev) => {
   if (f.password.value !== f.confirm.value) { $('#registerError').textContent = "Passwords don't match"; return; }
   try {
     const { user } = await api('POST', '/api/auth/register', {
-      username: f.username.value, password: f.password.value, name: f.name.value,
+      username: f.username.value, password: f.password.value, name: f.name.value, inviteCode: f.inviteCode.value,
     });
     await signedIn(user);
     toast(`Welcome, ${user.name}!`);

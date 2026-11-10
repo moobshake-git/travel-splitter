@@ -16,8 +16,9 @@ Open http://localhost:3000. Data is saved to `data.json` next to `server.js`
 
 ## Accounts
 - Everyone logs in with their own **username and password**.
-- **Create account**: enter your name, a username and a password. If a friend already
-  added you by that exact name, you take over that spot (max 10 people).
+- **Create account**: enter your name, a username and a password (max 10 people).
+  If a friend already added you, also enter the **invite code** they were shown. You then
+  take over that spot, with its trips and expenses. Each code works once.
 - Passwords are stored hashed (scrypt), never in plain text. Sessions last 30 days.
 - 5 wrong passwords in a row locks that username for 1 minute.
 - **Forgot password?** Whoever runs the server can reset it:
@@ -29,9 +30,14 @@ Open http://localhost:3000. Data is saved to `data.json` next to `server.js`
 - You only see trips you are on.
 - Expenses: any trip member can add one; only the person who **added** or **paid**
   for it can edit or delete it (others see a 🔒).
-- Trips: any member can edit; only the person who created it can delete it.
-- People: you can add buddies who haven't signed up yet ("invited"), and rename or remove
-  them until they create an account. Only you can rename yourself.
+- Trips: any member can edit; only the person who created it can delete it, and the
+  creator can't be removed from their own trip.
+- People: you can add buddies who haven't signed up yet ("invited"). You get an invite
+  code to send them (🔗 shows it again). You can rename or remove an invited person if you
+  added them or share a trip with them. Only you can rename yourself.
+- Each user only sees their own username; invite codes are only shown to people who can
+  manage that invitee.
+- Currencies must be a real 3-letter code (USD, EUR, SGD, JPY, …).
 
 ## Features
 - **Trips**: create, edit (name, currency, members), delete.
