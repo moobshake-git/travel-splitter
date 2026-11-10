@@ -135,6 +135,7 @@ function memberTrip(tripId, user) {
 //       'shares'  -> splits: [{personId, value}]   value = weight (e.g. 2 = double share)
 function computeShares(totalCents, mode, splits, trip) {
   if (!Array.isArray(splits) || splits.length === 0) bad('Pick at least one person to split with');
+  if (splits.some((s) => !s || typeof s !== 'object')) bad('Each split must be an object with a personId');
   const ids = splits.map((s) => s.personId);
   if (new Set(ids).size !== ids.length) bad('A person appears twice in the split');
   for (const id of ids) if (!trip.memberIds.includes(id)) bad('Split includes someone who is not on this trip');
@@ -458,6 +459,8 @@ const server = http.createServer((req, res) => {
           throw new HttpError(415, 'Expected JSON');
         }
         const body = raw ? JSON.parse(raw) : {};
+        // Handlers read fields off the body, so `null`, numbers, strings and arrays are all bad requests.
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object');
         const user = currentUser(req);
         for (const r of routes) {
           const m = r.method === req.method && url.pathname.match(r.re);
