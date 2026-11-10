@@ -5,7 +5,14 @@ if (require.main === module && process.argv[2] === 'reset-password') {
   process.exit(require('./bin/reset-password').resetPassword(process.argv.slice(3)));
 }
 
-const { server } = require('./lib/http');
+let server;
+try {
+  ({ server } = require('./lib/http'));
+} catch (err) {
+  if (err.code !== 'EDATAFILE' || require.main !== module) throw err;
+  console.error(err.message);
+  process.exit(1);
+}
 
 if (require.main === module) {
   const PORT = Number(process.argv[2]) || Number(process.env.PORT) || 3000;
