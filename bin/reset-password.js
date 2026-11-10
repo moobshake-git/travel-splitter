@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Reset a user's password: node bin/reset-password.js <username> <new-password>
 // (also available as: node server.js reset-password <username> <new-password>)
-function resetPassword([username, password]) {
+async function resetPassword([username, password]) {
   // A running server would ignore this change and later write its old copy back (#17).
   const holder = require('../lib/lock').lockHolder();
   if (holder) {
@@ -22,12 +22,12 @@ function resetPassword([username, password]) {
     console.error('Usage: node server.js reset-password <username> <new-password (6+ chars)>');
     return 1;
   }
-  p.account = { username: p.account.username, ...hashPassword(password) };
+  p.account = { username: p.account.username, ...(await hashPassword(password)) };
   revokeSessions(p.id);
   save();
   console.log(`Password reset for ${p.name} (${p.account.username}).`);
   return 0;
 }
 
-if (require.main === module) process.exit(resetPassword(process.argv.slice(2)));
+if (require.main === module) resetPassword(process.argv.slice(2)).then((code) => process.exit(code));
 module.exports = { resetPassword };

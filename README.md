@@ -34,8 +34,13 @@ Tests start the real server on a random port against a throwaway data file
 - **Create account**: enter your name, a username and a password (max 10 people).
   If a friend already added you, also enter the **invite code** they were shown. You then
   take over that spot, with its trips and expenses. Each code works once.
-- Passwords are stored hashed (scrypt), never in plain text. Sessions last 30 days.
-- 5 wrong passwords in a row locks that username for 1 minute.
+- Passwords are stored hashed (scrypt), never in plain text. Sessions last 30 days, and
+  only a hash of each session token is stored. Each person keeps at most 10 sessions.
+- 5 wrong passwords in a row locks that username for 1 minute; each further lockout is
+  twice as long (up to 1 hour). One network address that gets 30 logins wrong, across any
+  usernames, is locked out the same way.
+- **Change password** needs your current password, with the same lockout. 5 wrong guesses
+  also log that session out. Changing your password logs you out everywhere else.
 - **Forgot password?** Whoever runs the server can reset it. **Stop the server first**
   (the command refuses to run while it's up, because the running server would overwrite
   the change), then:
