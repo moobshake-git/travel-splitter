@@ -27,5 +27,10 @@
   // Number/string → integer hundredths (NaN if not a finite number).
   const toCents = (v) => Math.round(Number(v) * 100);
 
-  return { CATEGORIES, DEFAULT_CATEGORY, distribute, toCents };
+  // Percentages must add up to 100, give or take 0.001 (so 3 × 33.333 is fine).
+  // The extra 1e-9 absorbs float error: 100 - 99.999 is 0.0010000000000048885.
+  const PERCENT_TOLERANCE = 0.001;
+  const percentTotalOk = (total) => Math.abs(total - 100) <= PERCENT_TOLERANCE + 1e-9;
+
+  return { CATEGORIES, DEFAULT_CATEGORY, distribute, toCents, percentTotalOk };
 });

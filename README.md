@@ -14,13 +14,16 @@ Open http://localhost:3000. Data is saved to `data.json` next to `server.js`
 (delete that file to start fresh). Anyone on your Wi-Fi can use it at
 `http://<your-computer-ip>:3000`.
 
-## Tests
+## Development
 
-Uses Node's built-in test runner (Node 22+), still no dependencies:
+The app itself has no dependencies. Linting needs dev dependencies (ESLint), so run
+`npm install` once. Tests use Node's built-in runner (Node 22+).
 
 ```bash
-npm test           # run the API tests
-npm run coverage   # with a line/branch coverage report for server.js
+npm test           # API + unit tests
+npm run lint       # ESLint
+npm run check      # both; this is what CI runs on every push and pull request
+npm run coverage   # tests with a coverage report
 ```
 
 Tests start the real server on a random port against a throwaway data file

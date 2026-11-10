@@ -1,5 +1,5 @@
 // Travel Splitter front end (vanilla JS). Split math comes from shared.js (window.Shared).
-const { distribute, toCents } = window.Shared;
+const { distribute, toCents, percentTotalOk } = window.Shared;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -66,7 +66,7 @@ async function loadTrip() {
 
 // ---------- render ----------
 function render() {
-  try { if (state.tripId) localStorage.setItem('tripId', state.tripId); else localStorage.removeItem('tripId'); } catch {}
+  try { if (state.tripId) localStorage.setItem('tripId', state.tripId); else localStorage.removeItem('tripId'); } catch { /* storage blocked: just don't remember the trip */ }
 
   $('#meName').textContent = state.people.find((p) => p.id === state.me)?.name || state.user?.name || '';
 
@@ -315,8 +315,8 @@ function updateSplitPreview() {
   const { mode, rows } = state.split;
   const total = toCents($('#expenseForm').amount.value) || 0;
   const ids = activeRows();
-  let shares = {};
-  let foot = '';
+  const shares = {};
+  let foot;
   if (mode === 'equal') {
     distribute(total, ids.map(() => 1)).forEach((c, i) => (shares[ids[i]] = c));
     foot = `<span>${ids.length} ${ids.length === 1 ? 'person' : 'people'}</span><span>${ids.length ? money(Math.floor(total / ids.length), t.currency) + ' each' : ''}</span>`;
@@ -331,7 +331,7 @@ function updateSplitPreview() {
     distribute(total, w).forEach((c, i) => (shares[ids[i]] = c));
     if (mode === 'percent') {
       const p = +w.reduce((a, b) => a + b, 0).toFixed(3);
-      foot = `<span>Total ${p}%</span>` + (Math.abs(p - 100) < 0.001 ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
+      foot = `<span>Total ${p}%</span>` + (percentTotalOk(p) ? `<span class="good">✓ Balanced</span>` : `<span class="bad">${+(100 - p).toFixed(3)}% ${p < 100 ? 'left' : 'over'}</span>`);
     } else {
       foot = `<span>${w.reduce((a, b) => a + b, 0)} total shares</span><span></span>`;
     }
