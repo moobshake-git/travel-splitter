@@ -24,9 +24,35 @@ async function api(method, url, body) {
     body: method === 'GET' ? undefined : JSON.stringify(body || {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !url.startsWith('/api/auth/')) { showAuth(); throw new Error('Please log in'); }
+  if (res.status === 401 && !url.startsWith('/api/auth/')) {
+    showAuth('Your session has ended. Please log in again.');
+    throw Object.assign(new Error('Please log in'), { status: 401, sessionEnded: true });
+  }
   if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
   return data;
+}
+
+// Run an action with its button disabled (and aria-busy), so a double click can't
+// submit twice (#7).
+async function busy(btn, fn) {
+  if (btn?.disabled) return;
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+  try {
+    return await fn();
+  } finally {
+    if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+  }
+}
+
+// Show an error where the user is looking: in the open dialog's error line, or as a toast.
+// Errors outside a form (or "not found / not allowed / changed meanwhile") usually mean our
+// copy is out of date, so reload it from the server (#7).
+async function showError(e, el) {
+  if (e.sessionEnded) return; // already back on the login screen
+  if (el) el.textContent = e.message; else toast(e.message);
+  if (state.me && (!el || [403, 404, 409].includes(e.status))) {
+    try { await loadAll(); } catch { /* reported already */ }
+  }
 }
 
 // ---------- formatting ----------
@@ -64,10 +90,16 @@ async function loadAll() {
 }
 async function loadTrip() {
   if (!state.tripId) { state.expenses = []; state.summary = null; return; }
-  [state.expenses, state.summary] = await Promise.all([
-    api('GET', `/api/trips/${state.tripId}/expenses`),
-    api('GET', `/api/trips/${state.tripId}/summary`),
-  ]);
+  [state.expenses, state.summary] = await fetchTrip(state.tripId);
+}
+const fetchTrip = (id) => Promise.all([api('GET', `/api/trips/${id}/expenses`), api('GET', `/api/trips/${id}/summary`)]);
+
+// Switch trips only once the new one has loaded, so a failure (e.g. you were removed from it)
+// can't leave the old trip's data on screen under the new trip's id (#7).
+async function selectTrip(id) {
+  const [expenses, summary] = await fetchTrip(id);
+  Object.assign(state, { tripId: id, expenses, summary });
+  render();
 }
 
 // ---------- render ----------
@@ -203,17 +235,19 @@ function openPerson(p) {
   $('#personDialog').showModal();
 }
 $('#newPersonBtn').onclick = () => openPerson();
-$('#personForm').addEventListener('submit', async (ev) => {
+$('#personForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const name = ev.target.name.value;
-  try {
-    const p = state.editing.person;
-    const saved = p ? await api('PUT', `/api/people/${p.id}`, { name }) : await api('POST', '/api/people', { name });
-    $('#personDialog').close();
-    await loadAll();
-    if (p) toast('Renamed');
-    else showInvite(saved);
-  } catch (e) { $('#personError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      const p = state.editing.person;
+      const saved = p ? await api('PUT', `/api/people/${p.id}`, { name }) : await api('POST', '/api/people', { name });
+      $('#personDialog').close();
+      await loadAll();
+      if (p) toast('Renamed');
+      else showInvite(saved);
+    } catch (e) { showError(e, $('#personError')); }
+  });
 });
 const formatCode = (c) => (c ? `${c.slice(0, 4)}-${c.slice(4)}` : '');
 function showInvite(p) {
@@ -234,8 +268,10 @@ $('#peopleList').addEventListener('click', async (ev) => {
   if (del) {
     const p = state.people.find((x) => x.id === del.dataset.delPerson);
     if (!confirm(`Remove ${p.name}? They'll be taken off any trips they're on.`)) return;
-    try { await api('DELETE', `/api/people/${p.id}`); await loadAll(); toast('Person removed'); }
-    catch (e) { alert(e.message); }
+    await busy(del, async () => {
+      try { await api('DELETE', `/api/people/${p.id}`); await loadAll(); toast('Person removed'); }
+      catch (e) { showError(e); }
+    });
   }
 });
 
@@ -275,9 +311,11 @@ $('#editTripBtn').onclick = async () => {
   try { await loadAll(); } catch (e) { toast(e.message); return; }
   openTrip(trip());
 };
-$('#tripForm').addEventListener('submit', async (ev) => {
+$('#tripForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
-  const f = ev.target;
+  return busy(ev.submitter, () => saveTrip(ev.target));
+});
+async function saveTrip(f) {
   const body = {
     name: f.name.value,
     currency: f.currency.value.toUpperCase(),
@@ -294,26 +332,27 @@ $('#tripForm').addEventListener('submit', async (ev) => {
   } catch (e) {
     if (e.status === 409) {
       // Someone else saved first: reload and show their version so nothing gets undone.
-      await loadAll();
-      openTrip(trip());
+      try { await loadAll(); openTrip(trip()); } catch { /* shown below */ }
+      $('#tripError').textContent = e.message;
+      return;
     }
-    $('#tripError').textContent = e.message;
+    showError(e, $('#tripError'));
   }
-});
-$('#deleteTripBtn').onclick = async () => {
+}
+$('#deleteTripBtn').onclick = (ev) => busy(ev.currentTarget, async () => {
   const t = trip();
   if (!confirm(`Delete "${t.name}" and all ${state.expenses.length} of its expenses? This can't be undone.`)) return;
-  await api('DELETE', `/api/trips/${t.id}`);
-  state.tripId = null;
-  await loadAll();
-  toast('Trip deleted');
-};
+  try {
+    await api('DELETE', `/api/trips/${t.id}`);
+    state.tripId = null;
+    await loadAll();
+    toast('Trip deleted');
+  } catch (e) { showError(e); }
+});
 $('#tripList').addEventListener('click', async (ev) => {
   const li = ev.target.closest('[data-trip]');
-  if (!li) return;
-  state.tripId = li.dataset.trip;
-  await loadTrip();
-  render();
+  if (!li || li.dataset.trip === state.tripId) return;
+  try { await selectTrip(li.dataset.trip); } catch (e) { showError(e); }
 });
 
 // ---------- expense CRUD + split editor ----------
@@ -451,9 +490,11 @@ $('#splitRows').addEventListener('input', (ev) => {
 });
 $('#expenseForm').amount.addEventListener('input', updateSplitPreview);
 
-$('#expenseForm').addEventListener('submit', async (ev) => {
+$('#expenseForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
-  const f = ev.target;
+  return busy(ev.submitter, () => saveExpense(ev.target));
+});
+async function saveExpense(f) {
   const { mode, rows } = state.split;
   const body = {
     tripId: state.tripId,
@@ -474,8 +515,8 @@ $('#expenseForm').addEventListener('submit', async (ev) => {
     await loadTrip();
     render();
     toast(e ? 'Expense updated' : 'Expense added');
-  } catch (err) { $('#expenseError').textContent = err.message; }
-});
+  } catch (err) { showError(err, $('#expenseError')); }
+}
 
 $('#expenseList').addEventListener('click', async (ev) => {
   const edit = ev.target.closest('[data-edit-exp]');
@@ -485,10 +526,14 @@ $('#expenseList').addEventListener('click', async (ev) => {
     const e = state.expenses.find((x) => x.id === del.dataset.delExp);
     const what = isPayment(e) ? `the payment from ${personName(e.paidBy)} to ${personName(e.shares[0]?.personId)}` : `"${e.description}"`;
     if (!confirm(`Delete ${what} (${money(e.amountCents)})?`)) return;
-    await api('DELETE', `/api/expenses/${e.id}`);
-    await loadTrip();
-    render();
-    toast('Expense deleted');
+    await busy(del, async () => {
+      try {
+        await api('DELETE', `/api/expenses/${e.id}`);
+        await loadTrip();
+        render();
+        toast(isPayment(e) ? 'Payment deleted' : 'Expense deleted');
+      } catch (err) { showError(err); }
+    });
   }
 });
 $('#search').addEventListener('input', renderExpenses);
@@ -499,20 +544,31 @@ $('#transferList').addEventListener('click', async (ev) => {
   if (!btn) return;
   const x = state.summary.transfers[Number(btn.dataset.markPaid)];
   if (!confirm(`Record that ${personName(x.from)} paid ${personName(x.to)} ${money(x.cents)}?`)) return;
-  try {
-    await api('POST', '/api/settlements', { tripId: state.tripId, from: x.from, to: x.to, amount: amountText(x.cents), date: localToday() });
-    await loadTrip();
-    render();
-    toast('Payment recorded');
-  } catch (e) { toast(e.message); }
+  await busy(btn, async () => {
+    try {
+      await api('POST', '/api/settlements', { tripId: state.tripId, from: x.from, to: x.to, amount: amountText(x.cents), date: localToday() });
+      await loadTrip();
+      render();
+      toast('Payment recorded');
+    } catch (e) { showError(e); }
+  });
 });
 
 // ---------- accounts: log in / sign up / log out ----------
-function showAuth(tab) {
-  state.user = null; state.me = '';
+// Back to the login screen (logout, or the session ended). Close every dialog and forget
+// everything loaded, so nothing from this session can be seen or submitted by whoever logs in
+// next (#7).
+function showAuth(message = '') {
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+  Object.assign(state, {
+    user: null, me: '', people: [], trips: [], expenses: [], summary: null,
+    editing: { person: null, trip: null, expense: null },
+  });
+  render();
   $('#authScreen').hidden = false;
+  $('#loginError').textContent = message;
   $('#registerError').textContent = '';
-  switchAuthTab(tab || 'login');
+  switchAuthTab('login');
 }
 function hideAuth() { $('#authScreen').hidden = true; }
 function switchAuthTab(tab) {
@@ -522,6 +578,8 @@ function switchAuthTab(tab) {
   (tab === 'login' ? $('#loginForm') : $('#registerForm')).querySelector('input:not([hidden])')?.focus();
 }
 async function signedIn(user, maxPeople) {
+  // Whatever was on screen belonged to the previous session.
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   state.user = user; state.me = user.id;
   if (maxPeople) state.maxPeople = maxPeople;
   hideAuth();
@@ -532,46 +590,56 @@ async function signedIn(user, maxPeople) {
 
 $('#authTabs').addEventListener('click', (ev) => { const b = ev.target.closest('[data-tab]'); if (b) switchAuthTab(b.dataset.tab); });
 
-$('#loginForm').addEventListener('submit', async (ev) => {
+$('#loginForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;
-  try {
-    const { user } = await api('POST', '/api/auth/login', { username: f.username.value, password: f.password.value });
-    await signedIn(user);
-    toast(`Welcome back, ${user.name}!`);
-  } catch (e) { $('#loginError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      const { user } = await api('POST', '/api/auth/login', { username: f.username.value, password: f.password.value });
+      await signedIn(user);
+      toast(`Welcome back, ${user.name}!`);
+    } catch (e) { $('#loginError').textContent = e.message; }
+  });
 });
 
-$('#registerForm').addEventListener('submit', async (ev) => {
+$('#registerForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;
   if (f.password.value !== f.confirm.value) { $('#registerError').textContent = "Passwords don't match"; return; }
-  try {
-    const { user } = await api('POST', '/api/auth/register', {
-      username: f.username.value, password: f.password.value, name: f.name.value, inviteCode: f.inviteCode.value,
-    });
-    await signedIn(user);
-    toast(`Welcome, ${user.name}!`);
-  } catch (e) { $('#registerError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      const { user } = await api('POST', '/api/auth/register', {
+        username: f.username.value, password: f.password.value, name: f.name.value, inviteCode: f.inviteCode.value,
+      });
+      await signedIn(user);
+      toast(`Welcome, ${user.name}!`);
+    } catch (e) { $('#registerError').textContent = e.message; }
+  });
 });
 
-$('#logoutBtn').onclick = async () => {
-  await api('POST', '/api/auth/logout');
-  state.people = []; state.trips = []; state.expenses = []; state.summary = null;
-  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
-  showAuth();
-};
+$('#logoutBtn').onclick = (ev) => busy(ev.currentTarget, async () => {
+  try {
+    await api('POST', '/api/auth/logout');
+    showAuth();
+  } catch (e) { showError(e); }
+});
 
 $('#passwordBtn').onclick = () => { $('#passwordForm').reset(); $('#passwordError').textContent = ''; $('#passwordDialog').showModal(); };
-$('#passwordForm').addEventListener('submit', async (ev) => {
+$('#passwordForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const f = ev.target;
   if (f.next.value !== f.confirm.value) { $('#passwordError').textContent = "New passwords don't match"; return; }
-  try {
-    await api('POST', '/api/auth/password', { current: f.current.value, next: f.next.value });
-    $('#passwordDialog').close();
-    toast('Password updated');
-  } catch (e) { $('#passwordError').textContent = e.message; }
+  return busy(ev.submitter, async () => {
+    try {
+      await api('POST', '/api/auth/password', { current: f.current.value, next: f.next.value });
+      $('#passwordDialog').close();
+      toast('Password updated');
+    } catch (e) {
+      // Too many wrong guesses ends the session (#14).
+      if (e.status === 401) showAuth(e.message);
+      else showError(e, $('#passwordError'));
+    }
+  });
 });
 
 // ---------- start ----------
